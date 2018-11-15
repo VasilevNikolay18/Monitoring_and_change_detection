@@ -2,6 +2,7 @@
 from __future__ import division
 import sys
 import time
+import math
 import re
 import os
 import numpy as np
@@ -28,7 +29,6 @@ class Channel:
         :param bounds  : [list of corners]      - bounds of the raster                    (default = None)
         :param shape   : [list[width,height]]   - shape of the raster                     (default = None)
         :param driver  : [string]               - driver format of the raster             (default = None)
-        :return: constructor
         """
 
         self._array = array
@@ -147,7 +147,6 @@ class Image:
                                                   {exclude if 'folder' is indicated}
         :param channels   : [list[name of channels]]       - list of channel names for choosing which files will be read (default = None)
         :param metadata   : [OrderedDict{properties}]      - metadata of the image                                       (default = None)
-        :return: constructor
         """
 
         if folder != None: self.__load(folder, channels)
@@ -159,7 +158,6 @@ class Image:
         constructor #1 (using folder for downloading channels):
         :param channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image (required!!!)
         :param metadata:    [OrderedDict{properties}]      - metadata of the image                                 (default = None)
-        :return: constructor
         """
         try:
             self._bands = collections.OrderedDict(sorted(channelDict.items(), key=lambda x: x[0]))
@@ -174,7 +172,6 @@ class Image:
         constructor #2 (using folder for downloading channels):
         :param folder   : [string]                 - name of the folder which will be used for reading files     (required!!!)
         :param channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
-        :return: constructor
         """
 
         try:
@@ -373,7 +370,7 @@ class Image:
         :return: object (res/projection/transform/driver/shape/bounds/metadata)
         """
 
-        if len(self.bandNames()) != 1:
+        if (len(self.bandNames()) != 1) and (arg != 'metadata'):
             print('Operation can not be applied! Only one band is required!')
             sys.exit()
         channel = self._bands[self.bandNames()[0]]
@@ -393,9 +390,7 @@ class Image:
         :return: Ordereddict (year, month, day)
         """
 
-        date = self.get('DATE_ACQUIRED').split('-')
-
-        return {'year': int(date[0]), 'month': int(date[1]), 'day': int(date[2])}
+        return Date(self.get('DATE_ACQUIRED'))
 
     def first(self):
 
@@ -871,7 +866,6 @@ class ImageCollection:
         :param ImageList  : [dict{Image objects}]    - dictionary of Images which should be merge in image collection (required!!!)
                                                 {exclude if 'folder' is indicated}
         :param channels   : [list[name of channels]] - list of channel names for choosing which files will be read    (default = None)
-        :return: constructor
         """
 
         if folder != None: self.__load(folder, channels)
@@ -882,13 +876,12 @@ class ImageCollection:
         """
         constructor #1 (using image dictionary):
         :param ImageDict: [dictionary{Image objects}]  - dictionary of images which should be merge in image collection (required!!!)
-        :return: constructor
         """
 
         try:
             self._images = collections.OrderedDict(sorted(ImageDict.items(), key=lambda x: x[0]))
         except AttributeError:
-            print('Failed to create object! Type of argument must be \'OrderedDict\', but %s was found!' %(channelDict.__class__))
+            print('Failed to create object! Type of argument must be \'OrderedDict\', but %s was found!' %(ImageDict.__class__))
             sys.exit()
 
     def __load(self, folder, channels=['B2', 'B3', 'B4']):
@@ -897,7 +890,6 @@ class ImageCollection:
         constructor #2 (using root folder for downloading channels):
         :param folder   : [string]                 - name of the root which will be used for finding folders     (required!!!)
         :param channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
-        :return: constructor
         """
 
         try:
@@ -999,3 +991,167 @@ class ImageCollection:
         :return: ImageCollection
         """
 
+        newDict = collections.OrderedDict(map(lambda key, im: (key, im), list(self._images.keys()), list(self._images.values())))
+        return ImageCollection(ImageDict=newDict)
+
+
+# class Date:
+class Date():
+
+    def __init__(self, dateString):
+
+        """
+        constructor:
+        :param dateString: [string {'year'-'month'-'day'}] - the string which will be converted in Date {requires!!!}
+        """
+
+        try:
+            dateList = dateString.split('-')
+        except:
+            print('Unsupported format of date! It must be \'string\' such as: \'{year}-{month}-{day}\'')
+            sys.exit()
+        if ((int(dateList[1]) < 1) or (int(dateList[1]) > 12)):
+            print('Unsupported format of month! Expected values from 1 to 12; got %s' %(dateList[1]))
+            sys.exit()
+        elif ((int(dateList[2]) < 1) or (int(dateList[2]) > 31)):
+            print('Unsupported format of day! Expected values from 1 to 31; got %s' % (dateList[2]))
+            sys.exit()
+        self._year = int(dateList[0])
+        self._month = int(dateList[1])
+        self._day = int(dateList[2])
+
+
+    def __str__(self):
+
+        """
+        'print' rebooting:
+        :return: description (string)
+        """
+
+        return ('Date object:\n{start}\n\nyear: %(year)s\nmonth: %(month)s\nday: %(day)s\n{end}\n\n' %{'year': self._year, 'month': self._month, 'day': self._day})
+
+    def toJulianDate(self):
+
+        """
+        getting Julian Date
+        :return: value (number)
+        """
+
+        a = math.floor((14 - self._month) / 12)
+        y = self._year + 4800 - a
+        m = self._month + 12 * a - 3
+        return (self._day + math.floor(((153 * m + 2) / 5)) + (365 * y) + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400) - 32045)
+
+    def __gt__(self, date2):
+
+        """
+        ">" rebooting:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :return: boolean
+        """
+
+        try:
+            return self.__dateComparison(date2, 'gt')
+        except TypeError:
+            print('Attempt to use \'>\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
+                  %{'first': self.__class__, 'second': date2.__class__})
+            sys.exit()
+
+    def __ge__(self, date2):
+
+        """
+        ">=" rebooting:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :return: boolean
+        """
+
+        try:
+            return self.__dateComparison(date2, 'ge')
+        except TypeError:
+            print(
+                'Attempt to use \'>=\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
+                % {'first': self.__class__, 'second': date2.__class__})
+            sys.exit()
+
+    def __lt__(self, date2):
+
+        """
+        "<" rebooting:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :return: boolean
+        """
+
+        try:
+            return self.__dateComparison(date2, 'lt')
+        except TypeError:
+            print(
+                'Attempt to use \'<\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
+                % {'first': self.__class__, 'second': date2.__class__})
+            sys.exit()
+
+    def __le__(self, date2):
+
+        """
+        "<=" rebooting:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :return: boolean
+        """
+
+        try:
+            return self.__dateComparison(date2, 'le')
+        except TypeError:
+            print(
+                'Attempt to use \'<=\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
+                % {'first': self.__class__, 'second': date2.__class__})
+            sys.exit()
+
+    def __eq__(self, date2):
+
+        """
+        "==" rebooting:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :return: boolean
+        """
+
+        try:
+            return self.__dateComparison(date2, 'eq')
+        except TypeError:
+            print(
+                'Attempt to use \'==\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
+                % {'first': self.__class__, 'second': date2.__class__})
+            sys.exit()
+
+    def __ne__(self, date2):
+
+        """
+        "!=" rebooting:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :return: boolean
+        """
+
+        try:
+            return self.__dateComparison(date2, 'ne')
+        except TypeError:
+            print(
+                'Attempt to use \'!=\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
+                % {'first': self.__class__, 'second': date2.__class__})
+            sys.exit()
+
+    def __dateComparison(self, date2, ttype):
+
+        """
+        assist function for programming binary operations:
+        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
+        :param ttype : [string] - the name of rebooting operation                                                 [required!!!]
+        :return: boolean
+        """
+
+        JD1 = self.toJulianDate()
+        JD2 = date2.toJulianDate()
+        if ttype == 'gt': result = JD1 > JD2
+        elif ttype == 'ge': result = JD1 >= JD2
+        elif ttype == 'lt': result = JD1 < JD2
+        elif ttype == 'le': result = JD1 <= JD2
+        elif ttype == 'eq': result = JD1 == JD2
+        elif ttype == 'ne': result = JD1 != JD2
+        return result
