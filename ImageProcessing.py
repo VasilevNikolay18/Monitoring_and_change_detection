@@ -1,10 +1,8 @@
 # import some useful libraries:
 from __future__ import division
-from operator import itemgetter
 import sys
 import time
 import re
-import math
 import os
 import numpy as np
 import rasterio
@@ -24,15 +22,13 @@ class Channel:
     def __init__(self, array, res=None, transform=None, crs=None, bounds=None, shape=None, driver=None):
         """
         constructor:
-
-        array   : [np.ndarray]           - raster                                  (required!!!)
-        res     : [list[1-axis, 2-axis]] - resolution of the raster                (default = None)
-        crs     : [string]               - transformation parameters of the raster (default = None)
-        bounds  : [list of corners]      - bounds of the raster                    (default = None)
-        shape   : [list[width,height]]   - shape of the raster                     (default = None)
-        driver  : [string]               - driver format of the raster             (default = None)
-
-        return: constructor
+        :param array   : [np.ndarray]           - raster                                  (required!!!)
+        :param res     : [list[1-axis, 2-axis]] - resolution of the raster                (default = None)
+        :param crs     : [string]               - transformation parameters of the raster (default = None)
+        :param bounds  : [list of corners]      - bounds of the raster                    (default = None)
+        :param shape   : [list[width,height]]   - shape of the raster                     (default = None)
+        :param driver  : [string]               - driver format of the raster             (default = None)
+        :return: constructor
         """
 
         self._array = array
@@ -47,10 +43,7 @@ class Channel:
 
         """
         getting projection of the channel:
-
-        ---self---
-
-        return: projection
+        :return: projection
         """
 
         return self.__helpFunc('projection')
@@ -59,10 +52,7 @@ class Channel:
 
         """
         getting transformation parameters of the raster:
-
-        ---self---
-
-        return: transform
+        :return: transform
         """
 
         return self.__helpFunc('transform')
@@ -71,10 +61,7 @@ class Channel:
 
         """
         getting resolution of the raster:
-
-        ---self---
-
-        return: res (tuple)
+        :return: res (tuple)
         """
 
         return self.__helpFunc('res')
@@ -83,10 +70,7 @@ class Channel:
 
         """
         getting driver format of the raster:
-
-        ---self---
-
-        return: driver (string)
+        :return: driver (string)
         """
 
         return self.__helpFunc('driver')
@@ -95,10 +79,7 @@ class Channel:
 
         """
         getting shape of the raster:
-
-        ---self---
-
-        return: shape (tuple)
+        :return: shape (tuple)
         """
 
         return self.__helpFunc('shape')
@@ -107,10 +88,7 @@ class Channel:
 
         """
         getting bounds of the raster:
-
-        ---self---
-
-        return: bounds
+        :return: bounds
         """
 
         return self.__helpFunc('bounds')
@@ -119,10 +97,8 @@ class Channel:
 
         """
         just assist function for less writings -):
-
-        arg : [string] - the specifical name for determine function in which it will be used (required!!!)
-
-        return object (res/projection/transform/driver/shape/bounds)
+        :param arg : [string] - the specifical name for determine function in which it will be used (required!!!)
+        :return object (res/projection/transform/driver/shape/bounds)
         """
 
         if arg == 'res': result = self._res
@@ -137,10 +113,8 @@ class Channel:
 
         """
         getting value for giving pixel:
-
-        pos: [list[row, column]] - position of the pixel
-
-        return value (number)
+        :param pos: [list[row, column]] - position of the pixel
+        :return value (number)
         """
 
         return self._array[pos[0]-1,pos[1]-1]
@@ -149,10 +123,7 @@ class Channel:
 
         """
         giving right representation for Channel object:
-
-        ---self---
-
-        return description (string)
+        :return description (string)
         """
 
         return ('%(array)s\n'
@@ -171,14 +142,12 @@ class Image:
 
         """
         constructor:
-
-        folder     : [string]                       - name of the folder which will be used for reading files     (required!!!)
-        channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image       (required!!!)
+        :param folder     : [string]                       - name of the folder which will be used for reading files     (required!!!)
+        :param channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image       (required!!!)
                                                   {exclude if 'folder' is indicated}
-        channels   : [list[name of channels]]       - list of channel names for choosing which files will be read (default = None)
-        metadata   : [OrderedDict{properties}]      - metadata of the image                                       (default = None)
-
-        return: constructor
+        :param channels   : [list[name of channels]]       - list of channel names for choosing which files will be read (default = None)
+        :param metadata   : [OrderedDict{properties}]      - metadata of the image                                       (default = None)
+        :return: constructor
         """
 
         if folder != None: self.__load(folder, channels)
@@ -188,11 +157,9 @@ class Image:
 
         """
         constructor #1 (using folder for downloading channels):
-
-        channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image (required!!!)
-        metadata:    [OrderedDict{properties}]      - metadata of the image                                 (default = None)
-
-        return: constructor
+        :param channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image (required!!!)
+        :param metadata:    [OrderedDict{properties}]      - metadata of the image                                 (default = None)
+        :return: constructor
         """
         try:
             self._bands = collections.OrderedDict(sorted(channelDict.items(), key=lambda x: x[0]))
@@ -205,11 +172,9 @@ class Image:
 
         """
         constructor #2 (using folder for downloading channels):
-
-        folder   : [string]                 - name of the folder which will be used for reading files     (required!!!)
-        channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
-
-        return: constructor
+        :param folder   : [string]                 - name of the folder which will be used for reading files     (required!!!)
+        :param channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
+        :return: constructor
         """
 
         try:
@@ -261,10 +226,7 @@ class Image:
 
         """
         giving right representation for Image object:
-
-        --self--
-
-        return: description (string)
+        :return: description (string)
         """
 
         s = 'Image object:\n{start}\n\n'
@@ -280,10 +242,8 @@ class Image:
 
         """
         mapping function func over image
-
-        func: [function] - function which was mapping over image channels {requires!!!}
-
-        return: Image
+        :param func: [function] - function which was mapping over image channels {requires!!!}
+        :return: Image
         """
 
         channels = list(self._bands.values())
@@ -295,10 +255,7 @@ class Image:
 
         """
         getting names of all bands:
-
-        ---self---
-
-        return: band names (list)
+        :return: band names (list)
         """
 
         return list(self._bands.keys())
@@ -307,10 +264,8 @@ class Image:
 
         """
         selecting channels for getting new image which consist only selecting channels:
-
-        bands: [list//string] - list of the band names or band name which should be chosen (required!!!)
-
-        return: Image
+        :param bands: [list//string] - list of the band names or band name which should be chosen (required!!!)
+        :return: Image
         """
 
         if type(bands) == str: bands = bands.split()
@@ -328,10 +283,7 @@ class Image:
 
         """
         getting projection of the raster:
-
-        ---self---
-
-        return: projection
+        :return: projection
         """
 
         return self.__helpFunc('projection')
@@ -340,10 +292,7 @@ class Image:
 
         """
         getting transformation parameters of the raster:
-
-        ---self---
-
-        return: transform
+        :return: transform
         """
 
         return self.__helpFunc('transform')
@@ -352,10 +301,7 @@ class Image:
 
         """
         getting resolution of the raster:
-
-        ---self---
-
-        return: res (tuple)
+        :return: res (tuple)
         """
 
         return self.__helpFunc('res')
@@ -364,10 +310,7 @@ class Image:
 
         """
         getting driver format of the raster:
-
-        ---self---
-
-        return: driver (string)
+        :return: driver (string)
         """
 
         return self.__helpFunc('driver')
@@ -376,10 +319,7 @@ class Image:
 
         """
         getting shape of the raster:
-
-        ---self---
-
-        return: shape (tuple)
+        :return: shape (tuple)
         """
 
         return self.__helpFunc('shape')
@@ -388,10 +328,7 @@ class Image:
 
         """
         getting bounds of the raster:
-
-        ---self---
-
-        return: bounds
+        :return: bounds
         """
 
         return self.__helpFunc('bounds')
@@ -400,10 +337,8 @@ class Image:
 
         """
         getting value for giving pixel:
-
-        pos: [list[row, column]] - position of the pixel
-
-        return: value (number)
+        :param pos: [list[row, column]] - position of the pixel
+        :return: value (number)
         """
         if len(self.bandNames()) != 1:
             print('Attempt to get pixel value for several bands! Only one band is required!')
@@ -419,11 +354,9 @@ class Image:
 
         """
         getting metadata properties of the raster:
-
-        prop: [string] - the name of metadata property (required!!!)
+        :param prop: [string] - the name of metadata property (required!!!)
         Now following properties are available: 'CLOUD_COVER', 'DATE_ACQUIRED', 'SUN_ELEVATION', 'SUN_AZIMUTH'
-
-        return: metadata property (value)
+        :return: metadata property (value)
         """
         if not(prop in ['CLOUD_COVER', 'DATE_ACQUIRED', 'SUN_ELEVATION', 'SUN_AZIMUTH']):
             print('Metadata propertie \'%s\' does not exist! Available properties are: \'CLOUD_COVER\', \'DATE_ACQUIRED\','
@@ -435,11 +368,9 @@ class Image:
 
         """
         just assist function for less writings -):
-
-        arg : [string] - the specifical name for determine function in which it will be used (required!!!)
-        prop: [string] - the name of metadata property                                       (not required)
-
-        return: object (res/projection/transform/driver/shape/bounds/metadata)
+        :param arg : [string] - the specifical name for determine function in which it will be used (required!!!)
+        :param prop: [string] - the name of metadata property                                       (not required)
+        :return: object (res/projection/transform/driver/shape/bounds/metadata)
         """
 
         if len(self.bandNames()) != 1:
@@ -459,10 +390,7 @@ class Image:
 
         """
         getting the date of the image:
-
-        ---self---
-
-        return: Ordereddict (year, month, day)
+        :return: Ordereddict (year, month, day)
         """
 
         date = self.get('DATE_ACQUIRED').split('-')
@@ -473,10 +401,7 @@ class Image:
 
         """
         getting the first channel in image:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.select(self.bandNames()[0])
@@ -485,10 +410,8 @@ class Image:
 
         """
         adding band to given image:
-
-        band: [Image] - band which will be added to image [required!!!]
-
-        return: Image
+        :param band: [Image] - band which will be added to image [required!!!]
+        :return: Image
         """
         try:
             if len(band.bandNames()) != 1:
@@ -505,10 +428,8 @@ class Image:
 
         """
         rename band:
-
-        newName: [string] - new name for band
-
-        return: Image
+        :param newName: [string] - new name for band
+        :return: Image
         """
 
         if len(self.bandNames()) != 1:
@@ -525,10 +446,8 @@ class Image:
 
         """
         rewritting all rasters using new arrays but saving all raster properties:
-
-        array: [n-dimension, shape] - 3-dimension array, in which the first axis is channel stack [required!!!]
-
-        return: nothing!
+        :param array: [n-dimension, shape] - 3-dimension array, in which the first axis is channel stack [required!!!]
+        :return: nothing!
         """
 
         try:
@@ -542,10 +461,8 @@ class Image:
 
         """
         "+" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image
         """
 
         try:
@@ -559,10 +476,8 @@ class Image:
 
         """
         reverse "+" rebooting:
-
-        image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-
-        return: Image
+        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
+        :return: Image
         """
 
         try:
@@ -576,10 +491,8 @@ class Image:
 
         """
         "-" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image
         """
 
         try:
@@ -593,10 +506,8 @@ class Image:
 
         """
         reverse "-" rebooting:
-
-        image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-
-        return: Image
+        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
+        :return: Image
         """
 
         try:
@@ -610,10 +521,8 @@ class Image:
 
         """
         "*" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image
         """
 
         try:
@@ -627,10 +536,8 @@ class Image:
 
         """
         reverse "*" rebooting:
-
-        image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-
-        return: Image
+        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
+        :return: Image
         """
 
         try:
@@ -644,10 +551,8 @@ class Image:
 
         """
         "/" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image
         """
 
         try:
@@ -661,10 +566,8 @@ class Image:
 
         """
         reverse "/" rebooting:
-
-        image2: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-
-        return: Image
+        :param image2: [Image] - the first image which will be used for calculating result with the second image [required!!!]
+        :return: Image
         """
 
         try:
@@ -678,10 +581,8 @@ class Image:
 
         """
         "and" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -695,10 +596,8 @@ class Image:
 
         """
         reverse "and" rebooting:
-
-        image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-
-        return: Image (boolean mask)
+        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -712,10 +611,8 @@ class Image:
 
         """
         "or" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -730,10 +627,8 @@ class Image:
 
         """
         reverse "or" rebooting:
-
-        image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-
-        return: Image (boolean mask)
+        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -748,10 +643,8 @@ class Image:
 
         """
         ">" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -766,10 +659,8 @@ class Image:
 
         """
         ">=" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -784,10 +675,8 @@ class Image:
 
         """
         "<" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -802,10 +691,8 @@ class Image:
 
         """
         "<=" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -820,10 +707,8 @@ class Image:
 
         """
         "==" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -838,10 +723,8 @@ class Image:
 
         """
         "!=" rebooting:
-
-        image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-
-        return: Image (boolean mask)
+        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
+        :return: Image (boolean mask)
         """
 
         try:
@@ -856,10 +739,8 @@ class Image:
 
         """
         masking:
-
-        mask: [Image] - the mask using for masking image [required!!!]
-
-        return: Image (masked Image)
+        :param mask: [Image] - the mask using for masking image [required!!!]
+        :return: Image (masked Image)
         """
 
         copyImage = copy.deepcopy(self)
@@ -870,11 +751,9 @@ class Image:
 
         """
         assist function for programming binary operations:
-
-        image2: [Image]  - the second image which will be used for calculating result with the first image [required!!!]
-        ttype : [string] - the name of rebooting operation                                                 [required!!!]
-
-        return: Image
+        :param image2: [Image]  - the second image which will be used for calculating result with the first image [required!!!]
+        :param ttype : [string] - the name of rebooting operation                                                 [required!!!]
+        :return: Image
         """
 
         if image2.__class__ == Image:
@@ -907,10 +786,7 @@ class Image:
 
         """
         sin function:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.__unaryOperations('sin')
@@ -919,10 +795,7 @@ class Image:
 
         """
         cos function:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.__unaryOperations('cos')
@@ -931,10 +804,7 @@ class Image:
 
         """
         tan function:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.__unaryOperations('tan')
@@ -943,10 +813,7 @@ class Image:
 
         """
         cot function:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.__unaryOperations('cot')
@@ -955,10 +822,7 @@ class Image:
 
         """
         ln function:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.__unaryOperations('ln')
@@ -967,10 +831,7 @@ class Image:
 
         """
         inverse function:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self.__unaryOperations('invert')
@@ -979,11 +840,9 @@ class Image:
 
         """
         assist function for programming binary operations:
-
-        image2: [Image]  - the second image which will be used for calculating result with the first image [required!!!]
-        ttype : [string] - the name of rebooting operation                                                 [required!!!]
-
-        return: Image
+        :param image2: [Image]  - the second image which will be used for calculating result with the first image [required!!!]
+        :param ttype : [string] - the name of rebooting operation                                                 [required!!!]
+        :return: Image
         """
 
         im1shape = self.first().shape()
@@ -1008,13 +867,11 @@ class ImageCollection:
 
         """
         constructor:
-
-        folder     : [string]                 - name of the root which will be used for finding folders        (required!!!)
-        ImageList  : [dict{Image objects}]    - dictionary of Images which should be merge in image collection (required!!!)
+        :param folder     : [string]                 - name of the root which will be used for finding folders        (required!!!)
+        :param ImageList  : [dict{Image objects}]    - dictionary of Images which should be merge in image collection (required!!!)
                                                 {exclude if 'folder' is indicated}
-        channels   : [list[name of channels]] - list of channel names for choosing which files will be read    (default = None)
-
-        return: constructor
+        :param channels   : [list[name of channels]] - list of channel names for choosing which files will be read    (default = None)
+        :return: constructor
         """
 
         if folder != None: self.__load(folder, channels)
@@ -1024,10 +881,8 @@ class ImageCollection:
 
         """
         constructor #1 (using image dictionary):
-
-        ImageDict: [dictionary{Image objects}]  - dictionary of images which should be merge in image collection (required!!!)
-
-        return: constructor
+        :param ImageDict: [dictionary{Image objects}]  - dictionary of images which should be merge in image collection (required!!!)
+        :return: constructor
         """
 
         try:
@@ -1040,11 +895,9 @@ class ImageCollection:
 
         """
         constructor #2 (using root folder for downloading channels):
-
-        folder   : [string]                 - name of the root which will be used for finding folders     (required!!!)
-        channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
-
-        return: constructor
+        :param folder   : [string]                 - name of the root which will be used for finding folders     (required!!!)
+        :param channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
+        :return: constructor
         """
 
         try:
@@ -1068,10 +921,7 @@ class ImageCollection:
 
         """
         giving right representation for ImageCollection object:
-
-        --self--
-
-        return: description (string)
+        :return: description (string)
         """
 
         i = 1
@@ -1086,10 +936,7 @@ class ImageCollection:
 
         """
         getting size of the image collection:
-
-        ---self---
-
-        return: value (int)
+        :return: value (int)
         """
 
         return len(self._images.keys())
@@ -1098,10 +945,7 @@ class ImageCollection:
 
         """
         getting the first image in image collection:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
 
         return self._images[list(self._images.keys())[0]]
@@ -1110,10 +954,7 @@ class ImageCollection:
 
         """
         mapping function over image collection:
-
-        ---self---
-
-        return: Image
+        :return: Image
         """
         if num > 0: num0 = num - 1
         elif num < 0: num0 = num
@@ -1132,10 +973,7 @@ class ImageCollection:
 
         """
         mapping function over image collection:
-
-        ---self---
-
-        return: ImageCollection
+        :return: ImageCollection
         """
 
         newDict = collections.OrderedDict(map(lambda key,im: (key,im.Map(func)), list(self._images.keys()),list(self._images.values())))
@@ -1145,13 +983,19 @@ class ImageCollection:
 
         """
         selecting channels for getting new image collection which consist only selecting channels:
-
-        bands: [list//string] - list of the band names or band name which should be chosen (required!!!)
-
-        return: ImageCollection
+        :param bands: [list//string] - list of the band names or band name which should be chosen (required!!!)
+        :return: ImageCollection
         """
 
         newDict = collections.OrderedDict(map(lambda key, im: (key,im.select(bands)), list(self._images.keys()), list(self._images.values())))
         return ImageCollection(ImageDict=newDict)
 
+    def filterDate(self, dateStart, dateEnd):
+
+        """
+        filtering image collection by date:
+        :param dateStart: [string {'year'-'month'-'day'}] - start date {required}
+        :param dateEnd:   [string {'year'-'month'-'day'}] - finish date {required}
+        :return: ImageCollection
+        """
 
