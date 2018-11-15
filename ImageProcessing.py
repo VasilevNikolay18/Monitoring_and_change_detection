@@ -318,6 +318,10 @@ class Image:
         if selectedBands == []:
             print('Chosen bands were not found!')
             sys.exit()
+        OtherBands = [other for other in bands if not(other in list(self._bands.keys()))]
+        if OtherBands != []:
+            print('Bands %s were not found in Image.' %(OtherBands))
+            sys.exit()
         return Image(channelDict = collections.OrderedDict(selectedBands), metadata = self._metadata)
 
     def projection(self):
