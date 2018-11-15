@@ -990,8 +990,8 @@ class ImageCollection:
         :param dateEnd:   [string {'year'-'month'-'day'}] - finish date {required}
         :return: ImageCollection
         """
-
-        newDict = collections.OrderedDict(map(lambda key, im: (key, im), list(self._images.keys()), list(self._images.values())))
+        newDict = collections.OrderedDict([(key, im) for key, im in self._images.items()
+                                           if ((im.getDate() >= Date(dateStart)) and (im.getDate() <= Date(dateEnd)))])
         return ImageCollection(ImageDict=newDict)
 
 
