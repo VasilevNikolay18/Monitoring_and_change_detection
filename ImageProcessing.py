@@ -117,7 +117,12 @@ class Channel:
         :return value (number)
         """
 
-        return self._array[pos[0]-1,pos[1]-1]
+        try:
+            return self._array[pos[0]-1,pos[1]-1]
+        except IndexError:
+            print('Pixel with coordinates %(pos)s does not exist! Available values are: [1-%(maxrow)s ; 1-%(maxcol)s]]'
+                  %{'pos': pos, 'maxrow': self.shape()[0], 'maxcol': self.shape()[1]})
+            sys.exit()
 
     def __str__(self):
 
@@ -243,10 +248,11 @@ class Image:
         :return: Image
         """
 
-        channels = list(self._bands.values())
-        keys = list(self._bands.keys())
+        copyImage = copy.deepcopy(self)
+        channels = list(copyImage._bands.values())
+        keys = list(copyImage._bands.keys())
         newDict = collections.OrderedDict(map(lambda key, ch: (key, func(ch._array)), keys, channels))
-        return Image(channelDict=newDict, metadata=self._metadata)
+        return Image(channelDict=newDict, metadata=copyImage._metadata)
 
     def bandNames(self):
 
@@ -265,16 +271,17 @@ class Image:
         :return: Image
         """
 
+        copyImage = copy.deepcopy(self)
         if type(bands) == str: bands = bands.split()
-        selectedBands = [(key, self._bands[key]) for key in self._bands if key in bands]
+        selectedBands = [(key, copyImage._bands[key]) for key in copyImage._bands if key in bands]
         if selectedBands == []:
             print('Chosen bands were not found!')
             sys.exit()
-        OtherBands = [other for other in bands if not(other in list(self._bands.keys()))]
+        OtherBands = [other for other in bands if not(other in list(copyImage._bands.keys()))]
         if OtherBands != []:
             print('Bands %s were not found in Image.' %(OtherBands))
             sys.exit()
-        return Image(channelDict = collections.OrderedDict(selectedBands), metadata = self._metadata)
+        return Image(channelDict = collections.OrderedDict(selectedBands), metadata = copyImage._metadata)
 
     def projection(self):
 
@@ -340,12 +347,7 @@ class Image:
         if len(self.bandNames()) != 1:
             print('Attempt to get pixel value for several bands! Only one band is required!')
             sys.exit()
-        try:
-            return self._bands[self.bandNames()[0]].getPixel(pos)
-        except IndexError:
-            print('Pixel with coordinates %(pos)s does not exist! Available values are: [1-%(maxrow)s ; 1-%(maxcol)s]]'
-                  %{'pos': pos, 'maxrow': self.shape()[0], 'maxcol': self.shape()[1]})
-            sys.exit()
+        return self._bands[self.bandNames()[0]].getPixel(pos)
 
     def get(self, prop):
 
@@ -401,7 +403,7 @@ class Image:
 
         return self.select(self.bandNames()[0])
 
-    def addBand(self, band):
+    def addBands(self, bands):
 
         """
         adding band to given image:
@@ -409,12 +411,10 @@ class Image:
         :return: Image
         """
         try:
-            if len(band.bandNames()) != 1:
-                print('Attempt to add several bands! Only one band can be joined!')
-                sys.exit()
-            copyDict = self._bands
-            copyDict.update(band._bands)
-            return Image(channelDict = copyDict, metadata = self._metadata)
+            copyImage = copy.deepcopy(self)
+            copyDict = copyImage._bands
+            for key,band in bands._bands.items(): copyDict.update({key: band})
+            return Image(channelDict = copyDict, metadata = copyImage._metadata)
         except AttributeError:
             print('Attempt to add not \'Image\' object!')
             sys.exit()
@@ -427,12 +427,15 @@ class Image:
         :return: Image
         """
 
-        if len(self.bandNames()) != 1:
-            print('Attempt to rename several channels! Only one channel is required!')
-            sys.exit()
         try:
-            copyDict = collections.OrderedDict((newName, self._bands[key]) for key in self._bands)
-            return Image(channelDict = copyDict, metadata = self._metadata)
+            if type(newName) == str: newName = newName.split(',')
+            if len(newName) != len(self.bandNames()):
+                print('Count of bands does not match to count of new names! For correct renaming use as new names as bands you have selected! '
+                      'Found %(selected)s bands and %(names)s names!' %{'selected': len(self.bandNames()), 'names': len(newName)})
+                sys.exit()
+            copyImage = copy.deepcopy(self)
+            copyDict = collections.OrderedDict(map(lambda name,key: (name, copyImage._bands[key]), newName,list(copyImage._bands.keys())))
+            return Image(channelDict = copyDict, metadata = copyImage._metadata)
         except TypeError:
             print('Not available type of band name! It must be \'str\'!')
             sys.exit()
@@ -738,9 +741,7 @@ class Image:
         :return: Image (masked Image)
         """
 
-        copyImage = copy.deepcopy(self)
-        copyImage = self * mask
-        return copyImage
+        return self * mask
 
     def __binaryOperations(self, image2, ttype):
 
@@ -940,7 +941,8 @@ class ImageCollection:
         :return: Image
         """
 
-        return self._images[list(self._images.keys())[0]]
+        copyImage = copy.deepcopy(self._images[list(self._images.keys())[0]])
+        return copyImage
 
     def get(self, num):
 
@@ -955,7 +957,8 @@ class ImageCollection:
                   'image at the end of image collection.' %{'num': num, 'size': self.size()})
             sys.exit()
         try:
-            return self._images[list(self._images.keys())[num0]]
+            copyImage = copy.deepcopy(self._images[list(self._images.keys())[num0]])
+            return copyImage
         except IndexError:
             print('Image with number \'%(num)s\' does not exist! Use indexes from 1 to %(size)s or from -1 to -%(size)s for starting chose '
                   'image at the end of image collection.' %{'num': num, 'size': self.size()})
@@ -968,7 +971,8 @@ class ImageCollection:
         :return: ImageCollection
         """
 
-        newDict = collections.OrderedDict(map(lambda key,im: (key,im.Map(func)), list(self._images.keys()),list(self._images.values())))
+        copyCollection = copy.deepcopy(self._images)
+        newDict = collections.OrderedDict(map(lambda key,im: (key,im.Map(func)), list(copyCollection.keys()),list(copyCollection.values())))
         return ImageCollection(ImageDict = newDict)
 
     def select(self, bands):
@@ -979,7 +983,8 @@ class ImageCollection:
         :return: ImageCollection
         """
 
-        newDict = collections.OrderedDict(map(lambda key, im: (key,im.select(bands)), list(self._images.keys()), list(self._images.values())))
+        copyCollection = copy.deepcopy(self._images)
+        newDict = collections.OrderedDict(map(lambda key, im: (key,im.select(bands)), list(copyCollection.keys()), list(copyCollection.values())))
         return ImageCollection(ImageDict=newDict)
 
     def filterDate(self, dateStart, dateEnd):
@@ -990,7 +995,9 @@ class ImageCollection:
         :param dateEnd:   [string {'year'-'month'-'day'}] - finish date {required}
         :return: ImageCollection
         """
-        newDict = collections.OrderedDict([(key, im) for key, im in self._images.items()
+
+        copyCollection = copy.deepcopy(self._images)
+        newDict = collections.OrderedDict([(key, im) for key, im in copyCollection.items()
                                            if ((im.getDate() >= Date(dateStart)) and (im.getDate() <= Date(dateEnd)))])
         return ImageCollection(ImageDict=newDict)
 
