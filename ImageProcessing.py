@@ -1,15 +1,9 @@
 # import some useful libraries:
-from __future__ import division
-import sys
-import time
-import math
-import re
-import os
+import logging,collections,sys,os,re,time,copy,datetime,osr
 import numpy as np
-import rasterio
-import cv2
-import collections
-import copy
+from osgeo import gdal
+import grass.script as gscript
+from grass.script import array as garray
 
 # ///////////////////////////////////////////////////////
 """
@@ -17,183 +11,163 @@ interface
 """
 # ///////////////////////////////////////////////////////
 
+# get current environment:
+environ = gscript.parse_command('g.gisenv')
+GISDBASE = environ['GISDBASE'][1:-2]
+MAPSET = environ['MAPSET'][1:-2]
+LOCATION_NAME = environ['LOCATION_NAME'][1:-2]
+PROJECTPATH = os.path.join(GISDBASE,LOCATION_NAME,MAPSET)
+TEMPPATH = os.path.join(PROJECTPATH,'TEMP')
+
+if not(os.path.isdir(TEMPPATH)): os.mkdir(TEMPPATH)
+
+# set log file:
+logging.basicConfig(level=logging.INFO, format='%(asctime)s \'ImageProcessing\': %(lineno)-8s %(levelname)-8s %(message)s')
+
 # class Channel:
 class Channel:
 
-    def __init__(self, array, res=None, transform=None, crs=None, bounds=None, shape=None, driver=None):
-        """
-        constructor:
-        :param array   : [np.ndarray]           - raster                                  (required!!!)
-        :param res     : [list[1-axis, 2-axis]] - resolution of the raster                (default = None)
-        :param crs     : [string]               - transformation parameters of the raster (default = None)
-        :param bounds  : [list of corners]      - bounds of the raster                    (default = None)
-        :param shape   : [list[width,height]]   - shape of the raster                     (default = None)
-        :param driver  : [string]               - driver format of the raster             (default = None)
-        """
 
+    def __init__(self,array,res=None,transform=None,crs=None,bounds=None,shape=None):
+        """
+        Constructor:
+        :param: array:     [array]                       - array which will be used as raster {required!!!}
+        :param: res:       [list[EWres,NSres]]           - resolution of the raster           {default=None}
+        :param: transform: [list[parameters]]            - geotransformation of the raster    {default=None}
+                transform[0] - top geocoordinate of the raster;
+                transform[1] - east-west spatial resolution of the raster;
+                transform[2] - the first rotate angle of the raster;
+                transform[3] - left geocoordinate of the raster;
+                transform[4] - the second rotate angle of the raster;
+                transform[5] - north-south spatial resolution of the raster;
+        :param: crs:       [PROJ4 format]                - projection of the raster           {default=None}
+        :param: bounds:    [dictionary{'N','E','S','W'}] - coordinate of raster's boundary    {default=None}
+        :param: shape:     [list[Xsize,Ysize]]           - shape of the raster                {default=None}
+        """
         self._array = array
         self._transform = transform
         self._crs = crs
         self._res = res
-        self._driver = driver
         self._bounds = bounds
         self._shape = shape
 
+
     def projection(self):
-
         """
-        getting projection of the channel:
-        :return: projection
+        Getting projection of the channel:
+        :return: [PROJ4 format]
         """
-
         return self.__helpFunc('projection')
 
+
     def transform(self):
-
         """
-        getting transformation parameters of the raster:
-        :return: transform
+        Getting geotransformation of the channel:
+        :return: [list[parameters]]
         """
-
         return self.__helpFunc('transform')
 
+
     def res(self):
-
         """
-        getting resolution of the raster:
-        :return: res (tuple)
+        Getting resolution of the channel:
+        :return: [list[EWres,NSres]]
         """
-
         return self.__helpFunc('res')
 
-    def driver(self):
-
-        """
-        getting driver format of the raster:
-        :return: driver (string)
-        """
-
-        return self.__helpFunc('driver')
 
     def shape(self):
-
         """
-        getting shape of the raster:
-        :return: shape (tuple)
+        Getting shape of the channel:
+        :return: [list[Xsize,Ysize]]
         """
-
         return self.__helpFunc('shape')
 
+
     def bounds(self):
-
         """
-        getting bounds of the raster:
-        :return: bounds
+        Getting bounds of the channel:
+        :return: [dictionary{'N','E','S','W'}]
         """
-
         return self.__helpFunc('bounds')
 
-    def __helpFunc(self, arg):
 
+    def __helpFunc(self,type):
         """
-        just assist function for less writings -):
-        :param arg : [string] - the specifical name for determine function in which it will be used (required!!!)
-        :return object (res/projection/transform/driver/shape/bounds)
+        Just assist function for getting raster parameters:
+        :param type: [str] - name of the raster parameter {required!!!}
+        :return: raster parameter (projection,bounds,resolution,shape...)
         """
-
-        if arg == 'res': result = self._res
-        elif arg == 'projection': result = self._crs
-        elif arg == 'transform': result = self._transform
-        elif arg == 'driver': result = self._driver
-        elif arg == 'shape': result = self._shape
-        elif arg == 'bounds': result = self._bounds
+        if type == 'res': result = self._res
+        elif type == 'projection': result = self._crs
+        elif type == 'transform': result = self._transform
+        elif type == 'shape': result = self._shape
+        elif type == 'bounds': result = self._bounds
         return result
 
-    def getPixel(self, pos=[0,0]):
 
+    def getPixel(self,pos=[1,1]):
         """
-        getting value for giving pixel:
-        :param pos: [list[row, column]] - position of the pixel
-        :return value (number)
+        Getting pixel value:
+        :param pos: [list[X,Y]] - pixel's coo
+        :return:
         """
+        return self._array[pos[0] - 1, pos[1] - 1]
 
-        try:
-            return self._array[pos[0]-1,pos[1]-1]
-        except IndexError:
-            print('Pixel with coordinates %(pos)s does not exist! Available values are: [1-%(maxrow)s ; 1-%(maxcol)s]]'
-                  %{'pos': pos, 'maxrow': self.shape()[0], 'maxcol': self.shape()[1]})
-            sys.exit()
 
     def __str__(self):
-
-        """
-        giving right representation for Channel object:
-        :return description (string)
-        """
-
         return ('%(array)s\n'
                 '\'res\': %(res)s\n'
                 '\'crs\': %(crs)s\n'
-                '\'transform\':\n%(transform)s\n' 
+                '\'transform\':\n%(transform)s\n'
                 '\'shape\': %(shape)s\n'
                 '\'bounds\': %(bounds)s\n'
-                %{'array': self._array, 'res': self._res, 'crs': self._crs, 'transform': self._transform, 'shape': self._shape, 'bounds': self._bounds})
+                % {'array':self._array,'res':self._res,'crs':self._crs,'transform':self._transform,
+                   'shape':self._shape,'bounds':self._bounds})
 
 
 # class Image:
 class Image:
 
-    def __init__(self, folder=None, channelDict=None, channels=None, metadata=None):
+    def __init__(self,folder=None,channelDict=None,channels=None,metadata=None,maps=None,names=None,foldname=None):
+        if folder != None: self.__load(folder=folder,channels=channels)
+        elif channelDict != None: self.__construct(channelDict=channelDict,metadata=metadata,foldname=foldname)
+        else: self.__fromProj(maps=maps,names=names)
 
-        """
-        constructor:
-        :param folder     : [string]                       - name of the folder which will be used for reading files     (required!!!)
-        :param channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image       (required!!!)
-                                                  {exclude if 'folder' is indicated}
-        :param channels   : [list[name of channels]]       - list of channel names for choosing which files will be read (default = None)
-        :param metadata   : [OrderedDict{properties}]      - metadata of the image                                       (default = None)
-        """
 
-        if folder != None: self.__load(folder, channels)
-        else: self.__construct(channelDict, metadata)
+    def __fromProj(self,maps,names):
+        if type(maps) == str: maps = [maps]
+        if type(names) == str: names = [names]
+        chanDict = collections.OrderedDict()
+        for i in range(len(maps)):
+            array = garray.array(maps[i])
+            parsing = gscript.parse_command('r.info',map=maps[i],flags='ge')
+            res = [int(parsing['ewres']),int(parsing['nsres'])]
+            shape = [int(parsing['cols']),int(parsing['rows'])]
+            bounds = {'N':int(parsing['north']),'S':int(parsing['south']),
+                      'W':int(parsing['west']),'E':int(parsing['east'])}
+            crs = gscript.read_command('g.proj',flags='jf')
+            transform = self.__getTransformParameters(belowright=[bounds['S'],bounds['E']],
+                                                      topleft=[bounds['N'],bounds['W']],rastersize=shape,res=res)
+            chanDict.update({names[i]:Channel(array,res=res,transform=transform,crs=crs,bounds=bounds,shape=shape)})
+        self.__construct(channelDict=chanDict,metadata=None,foldname=None)
 
-    def __construct(self, channelDict, metadata=None):
 
-        """
-        constructor #1 (using folder for downloading channels):
-        :param channelDict: [OrderedDict{channel objects]} - dictionary of channels which should be merge in image (required!!!)
-        :param metadata:    [OrderedDict{properties}]      - metadata of the image                                 (default = None)
-        """
-        try:
-            self._bands = collections.OrderedDict(sorted(channelDict.items(), key=lambda x: x[0]))
-        except AttributeError:
-            print('Failed to create object! Type of argument must be \'OrderedDict\', but %s was found!' %(channelDict.__class__))
-            sys.exit()
+    def __construct(self,channelDict,metadata=None,foldname=None):
+        self._bands = collections.OrderedDict(sorted(channelDict.items(), key=lambda x: x[0]))
         self._metadata = metadata
+        self._folder = foldname
 
-    def __load(self, folder, channels=['B2', 'B3', 'B4']):
 
-        """
-        constructor #2 (using folder for downloading channels):
-        :param folder   : [string]                 - name of the folder which will be used for reading files     (required!!!)
-        :param channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
-        """
-
-        try:
-            files = os.listdir(folder)
-        except FileNotFoundError:
-            print('Folder \'%(foldername)s\' was not found!' % {'foldername': folder})
-            sys.exit()
-        try:
-            metadatafile = [name for name in files if re.findall(r'\w+MTL.txt', name) != []][0]
-        except IndexError:
-            print('Metadata in the folder \'%s\' was not found!' %(folder))
-            sys.exit()
+    def __load(self,folder,channels='ALL'):
+        files = os.listdir(folder)
+        self._folder = folder
+        metadatafile = [name for name in files if re.findall(r'\w+MTL.txt', name) != []][0]
         files = [name for name in files if name.endswith(tuple([".TIF", 'TIFF', 'jpg']))]
         if files == []:
-            print()
+            logging.error('No one files was found!')
             sys.exit()
-        with open('%(foldername)s\\%(filename)s' % {'foldername': folder, 'filename': metadatafile}) as f:
+        with open(os.path.join(folder,metadatafile)) as f:
             listrows = f.readlines()
             for row in listrows:
                 if re.findall(r'CLOUD_COVER', row) != []:
@@ -206,959 +180,446 @@ class Image:
                     sunazimuthindex = listrows.index(row)
             f.close()
         ChannelDict = collections.OrderedDict()
-        metadata = collections.OrderedDict([('CLOUD_COVER', listrows[cloudcoverindex].split(' = ')[1][:-1]),
-                                            ('DATE_ACQUIRED', listrows[dataacquiredindex].split(' = ')[1][:-1]),
-                                            ('SUN_ELEVATION', listrows[sunelevationindex].split(' = ')[1][:-1]),
-                                            ('SUN_AZIMUTH', listrows[sunazimuthindex].split(' = ')[1][:-1])])
+        metadata = collections.OrderedDict([('CLOUD_COVER',listrows[cloudcoverindex].split(' = ')[1][:-1]),
+                                            ('DATE_ACQUIRED',listrows[dataacquiredindex].split(' = ')[1][:-1]),
+                                            ('SUN_ELEVATION',listrows[sunelevationindex].split(' = ')[1][:-1]),
+                                            ('SUN_AZIMUTH',listrows[sunazimuthindex].split(' = ')[1][:-1])])
         self._metadata = metadata
+        if channels == 'ALL': channels = ['B1','B2','B3','B4','B5','B6','B7','B8','B9','B10','B11','BQA']
+        elif type(channels) == str: channels = [channels]
         for filename in files:
             START_TIME_FILE = time.time()
-            rasteriodata = rasterio.open('%(foldername)s\\%(filename)s' % {'foldername': folder, 'filename': filename})
             if re.findall(r'B\w+', filename.split('.')[0])[0] in channels:
-                newNote = Channel(rasteriodata.read(1), rasteriodata.res, rasteriodata.transform, rasteriodata.crs,
-                                  rasteriodata.bounds, rasteriodata.shape, rasteriodata.driver)
+                gdaldata = gdal.Open(os.path.join(folder,filename))
+                array = gdaldata.ReadAsArray()
+                transform = gdaldata.GetGeoTransform()
+                res = [abs(transform[1]),abs(transform[5])]
+                crs = gdaldata.GetProjection()
+                inSRS_converter = osr.SpatialReference()
+                inSRS_converter.ImportFromWkt(crs)
+                crs = inSRS_converter.ExportToProj4()
+                shape = [gdaldata.RasterXSize,gdaldata.RasterYSize]
+                NW = self.__getGeoCoordinates(0,0,transform)
+                SE = self.__getGeoCoordinates(shape[0], shape[1], transform)
+                bounds = {'N':NW['X'],'S':SE['X'],'W':NW['Y'],'E':SE['Y']}
+                newNote = Channel(array=array,res=res,transform=transform,crs=crs,bounds=bounds,shape=shape)
                 newChannel = {'%s' % (re.findall(r'B\w+', filename.split('.')[0])[0]): newNote}
                 ChannelDict.update(newChannel)
-                print('file %s was succesfuly downloaded' % (filename))
-                print('session time: --- %s seconds ---\n' % (time.time() - START_TIME_FILE))
-            rasteriodata.close()
+                logging.info('file %(filename)s was succesfuly downloaded\nsession time: --- %(time)s seconds ---\n'
+                             % {'filename': filename, 'time': (time.time() - START_TIME_FILE)})
+                gdaldata = None
         self._bands = ChannelDict
 
+
+    def __getGeoCoordinates(X,Y,transform):
+        Matrix1 = np.array(transform).reshape(2,3)
+        Matrix2 = np.array([1,X,Y]).reshape(3,1)
+        Matrix = np.dot(Matrix1,Matrix2).reshape(2,1)
+        return {'X': Matrix[0][0], 'Y': Matrix[1][0]}
+
+
+    __getGeoCoordinates = staticmethod(__getGeoCoordinates)
+
+
+    def __getTransformParameters(belowright,topleft,rastersize,res):
+        rotation1 = (belowright[0]-topleft[0]-res[0]*rastersize[0])/belowright[1]
+        rotation2 = (belowright[1]-topleft[1]+abs(res[1])*rastersize[1])/belowright[0]
+        return [topleft[0],res[0],rotation1,topleft[1],rotation2,-abs(res[1])]
+
+
+    __getTransformParameters = staticmethod(__getTransformParameters)
+
+
     def __str__(self):
-
-        """
-        giving right representation for Image object:
-        :return: description (string)
-        """
-
-        s = 'Image object:\n{start}\n\n'
+        s = 'Image object:\n{start}\n'
         for key in self._bands:
             s += ('\'channel\': %(channel)s\n'
                   '%(channelblock)s\n'
-                  %{'channel': key, 'channelblock': self._bands[key].__str__()})
-        s += '\'metadata\': %(metadata)s\n' %{'metadata': self._metadata}
+                  % {'channel': key, 'channelblock': self._bands[key].__str__()})
+        s += '\'metadata\': %(metadata)s\n' % {'metadata': self._metadata}
         s += '{end}\n\n'
         return s
 
-    def Map(self, func):
-
-        """
-        mapping function func over image
-        :param func: [function] - function which was mapping over image channels {requires!!!}
-        :return: Image
-        """
-
-        copyImage = copy.deepcopy(self)
-        channels = list(copyImage._bands.values())
-        keys = list(copyImage._bands.keys())
-        newDict = collections.OrderedDict(map(lambda key, ch: (key, func(ch._array)), keys, channels))
-        return Image(channelDict=newDict, metadata=copyImage._metadata)
 
     def bandNames(self):
-
-        """
-        getting names of all bands:
-        :return: band names (list)
-        """
-
         return list(self._bands.keys())
 
+
     def select(self, bands):
-
-        """
-        selecting channels for getting new image which consist only selecting channels:
-        :param bands: [list//string] - list of the band names or band name which should be chosen (required!!!)
-        :return: Image
-        """
-
         copyImage = copy.deepcopy(self)
-        if type(bands) == str: bands = bands.split()
-        selectedBands = [(key, copyImage._bands[key]) for key in copyImage._bands if key in bands]
+        if type(bands) == str: bands = [bands]
+        selectedBands = [(key,copyImage._bands[key]) for key in copyImage._bands if key in bands]
         if selectedBands == []:
-            print('Chosen bands were not found!')
+            logging.error('Chosen bands were not found!')
             sys.exit()
-        OtherBands = [other for other in bands if not(other in list(copyImage._bands.keys()))]
+        OtherBands = [other for other in bands if not (other in list(copyImage._bands.keys()))]
         if OtherBands != []:
-            print('Bands %s were not found in Image.' %(OtherBands))
+            logging.error('Bands %s were not found in Image.' % (OtherBands))
             sys.exit()
-        return Image(channelDict = collections.OrderedDict(selectedBands), metadata = copyImage._metadata)
+        return Image(channelDict=collections.OrderedDict(selectedBands),metadata=copyImage._metadata,foldname=copyImage._folder)
+
 
     def projection(self):
-
-        """
-        getting projection of the raster:
-        :return: projection
-        """
-
         return self.__helpFunc('projection')
 
+
     def transform(self):
-
-        """
-        getting transformation parameters of the raster:
-        :return: transform
-        """
-
         return self.__helpFunc('transform')
 
+
     def res(self):
-
-        """
-        getting resolution of the raster:
-        :return: res (tuple)
-        """
-
         return self.__helpFunc('res')
 
-    def driver(self):
-
-        """
-        getting driver format of the raster:
-        :return: driver (string)
-        """
-
-        return self.__helpFunc('driver')
 
     def shape(self):
-
-        """
-        getting shape of the raster:
-        :return: shape (tuple)
-        """
-
         return self.__helpFunc('shape')
 
+
     def bounds(self):
-
-        """
-        getting bounds of the raster:
-        :return: bounds
-        """
-
         return self.__helpFunc('bounds')
 
-    def getPixel(self, pos=[0,0]):
 
-        """
-        getting value for giving pixel:
-        :param pos: [list[row, column]] - position of the pixel
-        :return: value (number)
-        """
+    def getPixel(self,pos=[0,0]):
         if len(self.bandNames()) != 1:
-            print('Attempt to get pixel value for several bands! Only one band is required!')
+            logging.error('Attempt to get pixel value for several bands! Only one band is required!')
             sys.exit()
         return self._bands[self.bandNames()[0]].getPixel(pos)
 
-    def get(self, prop):
 
-        """
-        getting metadata properties of the raster:
-        :param prop: [string] - the name of metadata property (required!!!)
-        Now following properties are available: 'CLOUD_COVER', 'DATE_ACQUIRED', 'SUN_ELEVATION', 'SUN_AZIMUTH'
-        :return: metadata property (value)
-        """
-        if not(prop in ['CLOUD_COVER', 'DATE_ACQUIRED', 'SUN_ELEVATION', 'SUN_AZIMUTH']):
-            print('Metadata propertie \'%s\' does not exist! Available properties are: \'CLOUD_COVER\', \'DATE_ACQUIRED\','
-                  ' \'SUN_ELEVATION\', \'SUN_AZIMUTH\'' %(prop))
+    def get(self,prop):
+        if not (prop in ['CLOUD_COVER', 'DATE_ACQUIRED', 'SUN_ELEVATION', 'SUN_AZIMUTH']):
+            logging.error('Metadata propertie \'%s\' does not exist! Available properties are: '
+                          '\'CLOUD_COVER\', \'DATE_ACQUIRED\', \'SUN_ELEVATION\', \'SUN_AZIMUTH\'' % (prop))
             sys.exit()
         return self.__helpFunc('metadata', prop='%s' % (prop))
 
-    def __helpFunc(self, arg, prop='CLOUD_COVER'):
 
-        """
-        just assist function for less writings -):
-        :param arg : [string] - the specifical name for determine function in which it will be used (required!!!)
-        :param prop: [string] - the name of metadata property                                       (not required)
-        :return: object (res/projection/transform/driver/shape/bounds/metadata)
-        """
-
-        if (len(self.bandNames()) != 1) and (arg != 'metadata'):
-            print('Operation can not be applied! Only one band is required!')
+    def __helpFunc(self,arg, prop='CLOUD_COVER'):
+        if (len(self.bandNames())!= 1) and (arg!= 'metadata'):
+            logging.error('Operation can not be applied! Only one band is required!')
             sys.exit()
         channel = self._bands[self.bandNames()[0]]
         if arg == 'res': result = channel.res()
         elif arg == 'projection': result = channel.projection()
         elif arg == 'transform': result = channel.transform()
-        elif arg == 'driver': result = channel.driver()
         elif arg == 'shape': result = channel.shape()
         elif arg == 'bounds': result = channel.bounds()
         elif arg == 'metadata': result = self._metadata[prop]
         return result
 
+
     def getDate(self):
+        DateList = self.get('DATE_ACQUIRED').split('-')
+        return datetime.date(int(DateList[0]), int(DateList[1]), int(DateList[2]))
 
-        """
-        getting the date of the image:
-        :return: Ordereddict (year, month, day)
-        """
-
-        return Date(self.get('DATE_ACQUIRED'))
 
     def first(self):
-
-        """
-        getting the first channel in image:
-        :return: Image
-        """
-
         return self.select(self.bandNames()[0])
 
-    def addBands(self, bands):
 
-        """
-        adding band to given image:
-        :param band: [Image] - band which will be added to image [required!!!]
-        :return: Image
-        """
+    def addBands(self,bands):
         try:
             copyImage = copy.deepcopy(self)
             copyDict = copyImage._bands
-            for key,band in bands._bands.items(): copyDict.update({key: band})
-            return Image(channelDict = copyDict, metadata = copyImage._metadata)
+            for key, band in bands._bands.items(): copyDict.update({key: band})
+            return Image(channelDict=copyDict,metadata=copyImage._metadata,foldname=copyImage._folder)
         except AttributeError:
-            print('Attempt to add not \'Image\' object!')
+            logging.error('Attempt to add not \'Image\' object!')
             sys.exit()
 
-    def rename(self, newName):
 
-        """
-        rename band:
-        :param newName: [string] - new name for band
-        :return: Image
-        """
-
+    def rename(self,newName):
         try:
             if type(newName) == str: newName = newName.split(',')
             if len(newName) != len(self.bandNames()):
-                print('Count of bands does not match to count of new names! For correct renaming use as new names as bands you have selected! '
-                      'Found %(selected)s bands and %(names)s names!' %{'selected': len(self.bandNames()), 'names': len(newName)})
+                logging.error(
+                    'Count of bands does not match to count of new names! For correct renaming use as new names as bands you have selected! '
+                    'Found %(selected)s bands and %(names)s names!' % {'selected': len(self.bandNames()),
+                                                                       'names': len(newName)})
                 sys.exit()
             copyImage = copy.deepcopy(self)
-            copyDict = collections.OrderedDict(map(lambda name,key: (name, copyImage._bands[key]), newName,list(copyImage._bands.keys())))
-            return Image(channelDict = copyDict, metadata = copyImage._metadata)
+            copyDict = collections.OrderedDict(
+                map(lambda name, key: (name,copyImage._bands[key]), newName, list(copyImage._bands.keys())))
+            return Image(channelDict=copyDict,metadata=copyImage._metadata,foldname=copyImage._folder)
         except TypeError:
-            print('Not available type of band name! It must be \'str\'!')
+            logging.error('Not available type of band name! It must be \'str\'!')
             sys.exit()
 
-    def __rewrite(self, array):
 
-        """
-        rewritting all rasters using new arrays but saving all raster properties:
-        :param array: [n-dimension, shape] - 3-dimension array, in which the first axis is channel stack [required!!!]
-        :return: nothing!
-        """
+    def Save(self,folder):
+        first = self.first()
+        driver = gdal.GetDriverByName('GTiff')
+        cols = first.shape()[0]
+        rows = first.shape()[1]
+        bands = len(self.bandNames())
+        proj = first.projection()
+        inSRS_converter = osr.SpatialReference()
+        inSRS_converter.ImportFromProj4(proj)
+        proj = inSRS_converter.ExportToWkt()
+        transform = first.transform()
+        path = os.path.join(folder, '%s.tiff' % (name))
+        dt = gdal.GDT_Float16
+        outData = driver.Create(path, cols, rows, bands, dt)
+        outData.SetProjection(proj)
+        outData.SetGeoTransform(transform)
+        for i in range(bands):
+            outData.GetRasterBand(i + 1).WriteArray(self._bands[self.bandNames()[i]]._array)
+        outData = None
 
+    def toGRASS(self,i=1):
+
+        folder = self._folder
+        channels = self._bands.keys()
+        files = os.listdir(folder)
+        files = [name for name in files if name.endswith(tuple([".TIF", 'TIFF', 'jpg']))]
+        files = sorted(files)
+        rasters = []
+        for filename in files:
+            if re.findall(r'B\w+', filename.split('.')[0])[0] in channels:
+                input = os.path.join(folder,filename)
+                output = '%(main)s.%(i)s' %{'main':filename.split('.')[0].split('_B')[0],'i':i}
+                gscript.run_command('r.in.gdal',input=input,output=output,overwrite=True,flags='k')
+                i+=1
+                rasters.append(output)
+        self._rasters = rasters
+
+
+    def TOAR(self):
+        name = os.path.basename(self._folder)
+        input = name + '.'
+        output = name + '_toar.'
+        metfile = os.path.join(self._folder,'%s_MTL.txt' %(name))
         try:
-            for i in range(len(self.bandNames())):
-                self._bands[self.bandNames()[i]]._array = array[i:i + 1, :, :].reshape(array.shape[1], array.shape[2])
-        except IndexError:
-            print('Not available shape of \'array\' argument! Expected the same shape as Image object has!')
-            sys.exit()
-
-    def __add__(self, image2):
-
-        """
-        "+" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'add')
-        except TypeError:
-            print('Attempt to add inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image2.__class__})
-        sys.exit()
-
-    def __radd__(self, image1):
-
-        """
-        reverse "+" rebooting:
-        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image1, 'add')
-        except TypeError:
-            print('Attempt to add inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image1.__class__})
-        sys.exit()
-
-    def __sub__(self, image2):
-
-        """
-        "-" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'sub')
-        except TypeError:
-            print('Attempt to subtract inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image2.__class__})
-        sys.exit()
-
-    def __rsub__(self, image1):
-
-        """
-        reverse "-" rebooting:
-        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image1, 'sub')
-        except TypeError:
-            print('Attempt to subtract inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image1.__class__})
-        sys.exit()
-
-    def __mul__(self, image2):
-
-        """
-        "*" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'mul')
-        except TypeError:
-            print('Attempt to multiply inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image2.__class__})
-        sys.exit()
-
-    def __rmul__(self, image1):
-
-        """
-        reverse "*" rebooting:
-        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image1, 'mul')
-        except TypeError:
-            print('Attempt to multiply inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image1.__class__})
-        sys.exit()
-
-    def __truediv__(self, image2):
-
-        """
-        "/" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'div')
-        except TypeError:
-            print('Attempt to divide inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __rtruediv__(self, image1):
-
-        """
-        reverse "/" rebooting:
-        :param image2: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-        :return: Image
-        """
-
-        try:
-            return self.__binaryOperations(image1, 'div')
-        except TypeError:
-            print('Attempt to divide inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image1.__class__})
-            sys.exit()
-
-    def __and__(self, image2):
-
-        """
-        "and" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'and')
-        except TypeError:
-            print('Attempt to use \'AND\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __rand__(self, image1):
-
-        """
-        reverse "and" rebooting:
-        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image1, 'and')
-        except TypeError:
-            print('Attempt to use \'AND\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': image1.__class__})
-            sys.exit()
-
-    def __or__(self, image2):
-
-        """
-        "or" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'or')
-        except TypeError:
-            print(
-                'Attempt to use \'OR\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __ror__(self, image1):
-
-        """
-        reverse "or" rebooting:
-        :param image1: [Image] - the first image which will be used for calculating result with the second image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image1, 'or')
-        except TypeError:
-            print(
-                'Attempt to use \'OR\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image1.__class__})
-            sys.exit()
-
-    def __gt__(self, image2):
-
-        """
-        ">" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'gt')
-        except TypeError:
-            print(
-                'Attempt to use \'>\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __ge__(self, image2):
-
-        """
-        ">=" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'ge')
-        except TypeError:
-            print(
-                'Attempt to use \'>=\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __lt__(self, image2):
-
-        """
-        "<" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'lt')
-        except TypeError:
-            print(
-                'Attempt to use \'<\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __le__(self, image2):
-
-        """
-        "<=" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'le')
-        except TypeError:
-            print(
-                'Attempt to use \'<=\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __eq__(self, image2):
-
-        """
-        "==" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'eq')
-        except TypeError:
-            print(
-                'Attempt to use \'==\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def __ne__(self, image2):
-
-        """
-        "!=" rebooting:
-        :param image2: [Image] - the second image which will be used for calculating result with the first image [required!!!]
-        :return: Image (boolean mask)
-        """
-
-        try:
-            return self.__binaryOperations(image2, 'ne')
-        except TypeError:
-            print(
-                'Attempt to use \'!=\' operation for inconsistent objects! Available types are: \'Image\' and number! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': image2.__class__})
-            sys.exit()
-
-    def updateMask(self, mask):
-
-        """
-        masking:
-        :param mask: [Image] - the mask using for masking image [required!!!]
-        :return: Image (masked Image)
-        """
-
-        return self * mask
-
-    def __binaryOperations(self, image2, ttype):
-
-        """
-        assist function for programming binary operations:
-        :param image2: [Image]  - the second image which will be used for calculating result with the first image [required!!!]
-        :param ttype : [string] - the name of rebooting operation                                                 [required!!!]
-        :return: Image
-        """
-
-        if image2.__class__ == Image:
-            im2shape = image2.first().shape()
-            shape2 = [1, im2shape[0], im2shape[1]]
-            stack2 = np.concatenate([image2._bands[key]._array.reshape(shape2) for key in image2._bands if True],
-                                        axis=0)
-        else:
-            stack2 = image2
-        im1shape = self.first().shape()
-        shape1 = [1, im1shape[0], im1shape[1]]
-        stack1 = np.concatenate([self._bands[key]._array.reshape(shape1) for key in self._bands if True], axis=0)
-        if ttype == 'add': result = stack1 + stack2
-        elif ttype == 'sub': result = stack1 - stack2
-        elif (ttype == 'mul'): result = stack1 * stack2
-        elif ttype == 'div': result = stack1 / stack2
-        elif ttype == 'and': result = stack1 & stack2
-        elif ttype == 'or': result = stack1 | stack2
-        elif ttype == 'gt': result = stack1 > stack2
-        elif ttype == 'ge': result = stack1 >= stack2
-        elif ttype == 'lt': result = stack1 < stack2
-        elif ttype == 'le': result = stack1 <= stack2
-        elif ttype == 'eq': result = stack1 == stack2
-        elif ttype == 'ne': result = stack1 != stack2
+            gscript.run_command('i.landsat.toar',input=input,output=output,metfile=metfile,overwrite=True)
+        except:
+            pass
         copyImage = copy.deepcopy(self)
-        copyImage.__rewrite(result)
+        i=0
+        rasters = []
+        for key in copyImage._bands.keys():
+            i+=1
+            copyImage._bands[key]._array = garray.array('%s%s' %(output,i))
+            rasters.append(output)
+        copyImage._rasters = rasters
         return copyImage
 
-    def sin(self):
 
-        """
-        sin function:
-        :return: Image
-        """
+    def remove(self):
+        for name in self._rasters:
+            try:
+                gscript.run_command('g.remove',type='raster',name=name,flags='fb')
+            except:
+                pass
 
-        return self.__unaryOperations('sin')
 
-    def cos(self):
-
-        """
-        cos function:
-        :return: Image
-        """
-
-        return self.__unaryOperations('cos')
-
-    def tan(self):
-
-        """
-        tan function:
-        :return: Image
-        """
-
-        return self.__unaryOperations('tan')
-
-    def cot(self):
-
-        """
-        cot function:
-        :return: Image
-        """
-
-        return self.__unaryOperations('cot')
-
-    def ln(self):
-
-        """
-        ln function:
-        :return: Image
-        """
-
-        return self.__unaryOperations('ln')
-
-    def invert(self):
-
-        """
-        inverse function:
-        :return: Image
-        """
-
-        return self.__unaryOperations('invert')
-
-    def __unaryOperations(self, ttype):
-
-        """
-        assist function for programming binary operations:
-        :param image2: [Image]  - the second image which will be used for calculating result with the first image [required!!!]
-        :param ttype : [string] - the name of rebooting operation                                                 [required!!!]
-        :return: Image
-        """
-
-        im1shape = self.first().shape()
-        shape1_before = [1, im1shape[0], im1shape[1]]
-        stack1 = np.concatenate([self._bands[key]._array.reshape(shape1_before) for key in self._bands if True],
-                                axis=0)
-        if ttype == 'sin': result = np.sin(stack1)
-        elif ttype == 'cos': result = np.cos(stack1)
-        elif ttype == 'tan': result = np.tan(stack1)
-        elif ttype == 'cot': result = 1 / np.tan(stack1)
-        elif ttype == 'ln': result = np.log(stack1)
-        elif ttype == 'invert': result = ~stack1
+    def FMask(self,name,radius=3):
+        name_new = name + '_BQA_int'
+        gscript.run_command('r.mapcalc', expression='%(BQA_int)s=int(%(BQA)s)' %{'BQA_int':name_new,'BQA':name}, overwrite=True)
+        CloudMask_expression = 'CloudMask=((%(BQA)s & 32)!=0)&((%(BQA)s & 64)!=0)' %{'BQA':name_new}
+        CloudShadowMask_expression = 'CloudShadowMask=((%(BQA)s & 128) !=0)&((%(BQA)s & 256)!=0)' %{'BQA':name_new}
+        SnowMask_expression = 'SnowMask=((%(BQA)s & 512)!=0)&((%(BQA)s & 1024)!=0)' %{'BQA':name_new}
+        CirrusMask_expression = 'CirrusMask=((%(BQA)s & 2048)!=0)&((%(BQA)s & 4096)!=0)' %{'BQA':name_new}
+        ImageMask_expression = 'ImageMask=CloudMask | CloudShadowMask | SnowMask | CirrusMask'
+        gscript.run_command('r.mapcalc',expression=CloudMask_expression,overwrite=True)
+        gscript.run_command('r.mapcalc',expression=CloudShadowMask_expression,overwrite=True)
+        gscript.run_command('r.mapcalc',expression=SnowMask_expression,overwrite=True)
+        gscript.run_command('r.mapcalc',expression=CirrusMask_expression,overwrite=True)
+        gscript.run_command('r.mapcalc',expression=ImageMask_expression,overwrite=True)
+        output = name + '_FMask'
+        gscript.run_command('r.grow',input='ImageMask',output=output,radius=radius,overwrite=True)
         copyImage = copy.deepcopy(self)
-        copyImage.__rewrite(result)
+        copyImage._bands['FMask'] = copyImage._bands.pop('BQA')
+        copyImage._bands[copyImage.bandNames()[0]]._array = garray.array(output)
+        gscript.run_command('g.remove', type='raster', name=['CloudMask','CloudShadowMask','SnowMask','CirrusMask','ImageMask',name,name_new], flags='fb')
+        copyImage._rasters = [output]
         return copyImage
 
 
 # class ImageCollection:
 class ImageCollection:
 
-    def __init__(self, folder=None, channels=None, ImageDict=None):
+    def __init__(self,folder=None,channels=None,ImageDict=None):
+        if folder != None: self.__load(folder=folder,channels=channels)
+        else: self.__construct(ImageDict=ImageDict)
 
-        """
-        constructor:
-        :param folder     : [string]                 - name of the root which will be used for finding folders        (required!!!)
-        :param ImageList  : [dict{Image objects}]    - dictionary of Images which should be merge in image collection (required!!!)
-                                                {exclude if 'folder' is indicated}
-        :param channels   : [list[name of channels]] - list of channel names for choosing which files will be read    (default = None)
-        """
 
-        if folder != None: self.__load(folder, channels)
-        else: self.__construct(ImageDict)
-
-    def __construct(self, ImageDict):
-
-        """
-        constructor #1 (using image dictionary):
-        :param ImageDict: [dictionary{Image objects}]  - dictionary of images which should be merge in image collection (required!!!)
-        """
-
+    def __construct(self,ImageDict):
         try:
             self._images = collections.OrderedDict(sorted(ImageDict.items(), key=lambda x: x[0]))
         except AttributeError:
-            print('Failed to create object! Type of argument must be \'OrderedDict\', but %s was found!' %(ImageDict.__class__))
+            logging.error('Failed to create object! Type of argument must be \'OrderedDict\', but %s was found!' %(ImageDict.__class__))
             sys.exit()
 
-    def __load(self, folder, channels=['B2', 'B3', 'B4']):
 
-        """
-        constructor #2 (using root folder for downloading channels):
-        :param folder   : [string]                 - name of the root which will be used for finding folders     (required!!!)
-        :param channels : [list[name of channels]] - list of channel names for choosing which files will be read (default = ['B2', 'B3', 'B4'])
-        """
-
+    def __load(self,folder,channels='ALL'):
         try:
             files = os.listdir(folder)
         except FileNotFoundError:
-            print('Folder %(foldername)s was not found!' % {'foldername': folder})
+            logging.error('Folder %(foldername)s was not found!' % {'foldername': folder})
             sys.exit()
         self._images = collections.OrderedDict()
-        dirlist = [item for item in os.listdir(folder) if os.path.isdir(os.path.join(folder, item))]
+        dirlist = [item for item in os.listdir(folder) if os.path.isdir(os.path.join(folder,item))]
         START_TIME_GENERAL = time.time()
-        i = 1
+        i=1
         for foldname in dirlist:
-            print('%(num)s) Reading folder %(folder)s\n' % {'num': i, 'folder': foldname})
-            im = Image(folder='%(root)s\\%(foldname)s' % {'root': folder, 'foldname': foldname}, channels=channels)
+            logging.info('%(num)s) Reading folder %(folder)s\n' % {'num': i, 'folder': foldname})
+            im = Image(folder=os.path.join(folder,foldname),channels=channels)
             self._images.update({'%s' % (foldname): im})
-            print('general time: --- %s seconds ---\n' % (time.time() - START_TIME_GENERAL))
-            i += 1
-        print('Downloading was successefuly completed!\nTotal number of rasters: %(num)s.\n' % {'num': i - 1})
+            logging.info('general time: --- %s seconds ---\n' % (time.time() - START_TIME_GENERAL))
+            i+=1
+        logging.info('Downloading was successefuly completed!\nTotal number of rasters: %(num)s.\n' % {'num': i - 1})
+
 
     def __str__(self):
-
-        """
-        giving right representation for ImageCollection object:
-        :return: description (string)
-        """
-
         i = 1
-        s = 'ImageCollection object:\n{start}\n\n'
+        s = 'ImageCollection object:\n{start}\n'
         for key in self._images:
             s += '%(num)s) %(name)s  %(bands)s\n' % {'num': i, 'name': key, 'bands': self._images[key].bandNames()}
             i += 1
         s += '{end}\n\n'
         return s
 
+
     def size(self):
-
-        """
-        getting size of the image collection:
-        :return: value (int)
-        """
-
         return len(self._images.keys())
 
+
     def first(self):
-
-        """
-        getting the first image in image collection:
-        :return: Image
-        """
-
         copyImage = copy.deepcopy(self._images[list(self._images.keys())[0]])
         return copyImage
 
-    def get(self, num):
 
-        """
-        mapping function over image collection:
-        :return: Image
-        """
+    def get(self,num):
         if num > 0: num0 = num - 1
         elif num < 0: num0 = num
         else:
-            print('Image with number \'%(num)s\' does not exist! Use indexes from 1 to %(size)s or from -1 to -%(size)s for starting chose '
+            logging.error('Image with number \'%(num)s\' does not exist! Use indexes from 1 to %(size)s or from -1 to -%(size)s for starting chose '
                   'image at the end of image collection.' %{'num': num, 'size': self.size()})
             sys.exit()
         try:
             copyImage = copy.deepcopy(self._images[list(self._images.keys())[num0]])
             return copyImage
         except IndexError:
-            print('Image with number \'%(num)s\' does not exist! Use indexes from 1 to %(size)s or from -1 to -%(size)s for starting chose '
+            logging.error('Image with number \'%(num)s\' does not exist! Use indexes from 1 to %(size)s or from -1 to -%(size)s for starting chose '
                   'image at the end of image collection.' %{'num': num, 'size': self.size()})
             sys.exit()
 
-    def Map(self, func):
 
-        """
-        mapping function over image collection:
-        :return: ImageCollection
-        """
-
+    def Map(self,func):
         copyCollection = copy.deepcopy(self._images)
-        newDict = collections.OrderedDict(map(lambda key,im: (key,im.Map(func)), list(copyCollection.keys()),list(copyCollection.values())))
+        newDict = collections.OrderedDict(map(lambda key,im: (key,func(im)), list(copyCollection.keys()),list(copyCollection.values())))
         return ImageCollection(ImageDict = newDict)
 
-    def select(self, bands):
 
-        """
-        selecting channels for getting new image collection which consist only selecting channels:
-        :param bands: [list//string] - list of the band names or band name which should be chosen (required!!!)
-        :return: ImageCollection
-        """
+    def select(self,bands):
+        def _f(im):
+            return im.select(bands)
+        return self.Map(_f)
 
-        copyCollection = copy.deepcopy(self._images)
-        newDict = collections.OrderedDict(map(lambda key, im: (key,im.select(bands)), list(copyCollection.keys()), list(copyCollection.values())))
-        return ImageCollection(ImageDict=newDict)
 
-    def filterDate(self, dateStart, dateEnd):
-
-        """
-        filtering image collection by date:
-        :param dateStart: [string {'year'-'month'-'day'}] - start date {required}
-        :param dateEnd:   [string {'year'-'month'-'day'}] - finish date {required}
-        :return: ImageCollection
-        """
-
+    def filterDate(self,dateStart,dateEnd):
+        dateStartList = dateStart.split('-')
+        dateEndList = dateEnd.split('-')
+        dateStartDateform = datetime.date(int(dateStartList[0]), int(dateStartList[1]), int(dateStartList[2]))
+        dateEndDateform = datetime.date(int(dateEndList[0]), int(dateEndList[1]), int(dateEndList[2]))
         copyCollection = copy.deepcopy(self._images)
         newDict = collections.OrderedDict([(key, im) for key, im in copyCollection.items()
-                                           if ((im.getDate() >= Date(dateStart)) and (im.getDate() <= Date(dateEnd)))])
+                                           if ((im.getDate() >= dateStartDateform) and (im.getDate() <= dateEndDateform))])
         return ImageCollection(ImageDict=newDict)
 
 
-# class Date:
-class Date():
-
-    def __init__(self, dateString):
-
-        """
-        constructor:
-        :param dateString: [string {'year'-'month'-'day'}] - the string which will be converted in Date {requires!!!}
-        """
-
-        try:
-            dateList = dateString.split('-')
-        except:
-            print('Unsupported format of date! It must be \'string\' such as: \'{year}-{month}-{day}\'')
-            sys.exit()
-        if ((int(dateList[1]) < 1) or (int(dateList[1]) > 12)):
-            print('Unsupported format of month! Expected values from 1 to 12; got %s' %(dateList[1]))
-            sys.exit()
-        elif ((int(dateList[2]) < 1) or (int(dateList[2]) > 31)):
-            print('Unsupported format of day! Expected values from 1 to 31; got %s' % (dateList[2]))
-            sys.exit()
-        self._year = int(dateList[0])
-        self._month = int(dateList[1])
-        self._day = int(dateList[2])
+    def toGRASS(self,i=1):
+        for image in self._images.values():
+            image.toGRASS(i=i)
 
 
-    def __str__(self):
+    def TOAR(self):
+        def _f(image):
+            return image.TOAR()
+        return self.Map(_f)
 
-        """
-        'print' rebooting:
-        :return: description (string)
-        """
 
-        return ('Date object:\n{start}\n\nyear: %(year)s\nmonth: %(month)s\nday: %(day)s\n{end}\n\n' %{'year': self._year, 'month': self._month, 'day': self._day})
+    def remove(self):
+        for image in self._images.values():
+            image.remove()
 
-    def toJulianDate(self):
 
-        """
-        getting Julian Date
-        :return: value (number)
-        """
+    def FMask(self,radius=3):
+        def _f(image):
+            name = image._rasters[0]
+            return image.FMask(name=name,radius=radius)
+        return self.Map(_f)
 
-        a = math.floor((14 - self._month) / 12)
-        y = self._year + 4800 - a
-        m = self._month + 12 * a - 3
-        return (self._day + math.floor(((153 * m + 2) / 5)) + (365 * y) + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400) - 32045)
 
-    def __gt__(self, date2):
+    def TMaskAlgorithm(self,BACKUP_ALG_THRESHOLD=15,
+                            RADIUS_BUFF=3,
+                            T_MEDIAN_THRESHOLD=0.04,
+                            GREEN_CHANNEL_PURE_SNOW_THRESHOLD=0.4,
+                            NIR_CHANNEL_PURE_SNOW_THRESHOLD=0.12,
+                            BLUE_CHANNEL_THRESHOLD=0.04,
+                            NIR_CHANNEL_CLOUD_SNOW_THRESHOLD=0.04,
+                            NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04,
+                            SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04):
 
-        """
-        ">" rebooting:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :return: boolean
-        """
+        # download 'B3' (blue channel), 'B5' (Near Infrared (NIR)) and 'B6' (Shortwave Infrared (SWIR) 1) channels:
+        logging.info('downloading blue channel, Near Infrared (NIR) and Shortwave Infrared (SWIR) 1 channels to GRASS:')
+        collection = self.select(['B3','B5','B6'])
+        collection.toGRASS(i=1)
 
-        try:
-            return self.__dateComparison(date2, 'gt')
-        except TypeError:
-            print('Attempt to use \'>\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
-                  %{'first': self.__class__, 'second': date2.__class__})
-            sys.exit()
+        # apply TOAR convertion:
+        logging.info('Applying TOAR convertion:')
+        collection_toar = collection.TOAR()
 
-    def __ge__(self, date2):
+        # delete source images from projects:
+        collection.remove()
 
-        """
-        ">=" rebooting:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :return: boolean
-        """
+        # the size of the collection:
+        ImageCounts = collection_toar.size()
+        text1 = 'Total number of images: %s' %(ImageCounts)
+        text2 = 'Warning: You have less than %s images!' %(BACKUP_ALG_THRESHOLD)
+        if ImageCounts>=BACKUP_ALG_THRESHOLD: print(text1)
+        else: print(text2)
 
-        try:
-            return self.__dateComparison(date2, 'ge')
-        except TypeError:
-            print(
-                'Attempt to use \'>=\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': date2.__class__})
-            sys.exit()
+        # download 'BQA' channel:
+        logging.info('downloading \'BQA\' channel to GRASS:')
+        collection_BQA = self.select('BQA')
+        collection_BQA.toGRASS(i=4)
 
-    def __lt__(self, date2):
+        # compute FMask algorithm:
+        logging.info('Computing FMask algorithm:')
+        collection_FMask = collection_BQA.FMask(radius=RADIUS_BUFF)
 
-        """
-        "<" rebooting:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :return: boolean
-        """
+        return collection_FMask
 
-        try:
-            return self.__dateComparison(date2, 'lt')
-        except TypeError:
-            print(
-                'Attempt to use \'<\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': date2.__class__})
-            sys.exit()
 
-    def __le__(self, date2):
 
-        """
-        "<=" rebooting:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :return: boolean
-        """
 
-        try:
-            return self.__dateComparison(date2, 'le')
-        except TypeError:
-            print(
-                'Attempt to use \'<=\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': date2.__class__})
-            sys.exit()
 
-    def __eq__(self, date2):
 
-        """
-        "==" rebooting:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :return: boolean
-        """
 
-        try:
-            return self.__dateComparison(date2, 'eq')
-        except TypeError:
-            print(
-                'Attempt to use \'==\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': date2.__class__})
-            sys.exit()
 
-    def __ne__(self, date2):
 
-        """
-        "!=" rebooting:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :return: boolean
-        """
+"""
 
-        try:
-            return self.__dateComparison(date2, 'ne')
-        except TypeError:
-            print(
-                'Attempt to use \'!=\' operation for inconsistent objects! Available type is: \'Date\'! Found: %(first)s and %(second)s'
-                % {'first': self.__class__, 'second': date2.__class__})
-            sys.exit()
 
-    def __dateComparison(self, date2, ttype):
+            
 
-        """
-        assist function for programming binary operations:
-        :param date2: [Date] - the second date which will be compared with the first date [required!!!]
-        :param ttype : [string] - the name of rebooting operation                                                 [required!!!]
-        :return: boolean
-        """
 
-        JD1 = self.toJulianDate()
-        JD2 = date2.toJulianDate()
-        if ttype == 'gt': result = JD1 > JD2
-        elif ttype == 'ge': result = JD1 >= JD2
-        elif ttype == 'lt': result = JD1 < JD2
-        elif ttype == 'le': result = JD1 <= JD2
-        elif ttype == 'eq': result = JD1 == JD2
-        elif ttype == 'ne': result = JD1 != JD2
-        return result
+            def reduceCount(self):
+                gscript.run_command('r.mapcalc',expression='ConditionMap=0',overwrite=True)
+                for key in self._images.keys():
+                    expression = 'ConditionMap=ConditionMap + %s_FMask' %(key)
+                    gscript.run_command('r.mapcalc',expression=expression,overwrite=True)
+                return Image(maps='ConditionMap',names='ConditionMap')
+"""
+
+
+
+
+
+
+
+        # calculate total number of non clear pixels for image collection:
+        #logging.info('Calculate total number of non clear pixels for image collection:')
+        #ConditionMap = collection_FMask.reduceCount()
+
