@@ -91,6 +91,15 @@ def getDate(image):
     DateList = get(image=image, prop='DATE_ACQUIRED')['DATE_ACQUIRED'].split('-')
     return datetime.date(int(DateList[0]), int(DateList[1]), int(DateList[2]))
 
+# selecting channels from GRASS:
+def selectFromGrass(collection,channels):
+    if type(channels) == str: channels = [channels]
+    return sorted([im for im in collection if im.split('.')[1] in channels])
+
+# selecting channel:
+def select(collection,channel):
+    return sorted([im[im.index(im[0].split('.')[0] + '.' + channel)] for im in collection])
+
 # getting reconstruction using regression analyzis:
 def reconstruction(images,coeffs,name):
     expression = '%s=' %(name)
@@ -165,10 +174,10 @@ def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRE
                    NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04):
     """
     # sorting:
-    B3 = sorted([im for im in rasters if im.split('.')[1] == 'B3_toar'])
-    #B5 = sorted([im for im in rasters if im.split('.')[1] == 'B5'])
-    #B6 = sorted([im for im in rasters if im.split('.')[1] == 'B6'])
-    BQA = sorted([im for im in rasters if im.split('.')[1] == 'BQA'])
+    B3 = selectFromGrass(rasters,''B3_toar'')
+    #B5 = selectFromGrass(rasters,''B5_toar'')
+    #B6 = selectFromGrass(rasters,''B6_toar'')
+    BQA = selectFromGrass(rasters,''BQA'')
     #images = [[ch1,ch2,ch3,ch4] for (ch1,ch2,ch3,ch4) in zip(B3,B5,B6,BQA)]
     images = [[ch1, ch2] for ch1, ch2 in zip(B3, BQA)]
 
@@ -313,7 +322,7 @@ def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRE
     images = [image1,image2,image3,image4,image5,image6,image7,image8,image9,image10]
 
     # regression for blue channel:
-    B3 = sorted([im[im.index(im[0].split('.')[0] + '.B3_masked')] for im in images])
+    B3 = select(images,'B3_masked')
     RLR_B3_maps,RLR_B3_coeffs = RobustRegression(B3)
     #RLR_B3_recon = reconstruction(RLR_B3_maps,RLR_B3_coeffs,'reconstruction.B3')
 
