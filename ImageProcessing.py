@@ -23,7 +23,7 @@ def loadImage(folder, channels='ALL'):
     files = os.listdir(folder)
     metadatafile = [name for name in files if name.endswith("MTL.txt")][0]
     copyfile(os.path.join(folder, metadatafile), os.path.join(METAPATH, metadatafile))
-    files = [name for name in files if name.endswith(tuple([".TIF", 'TIFF', 'jpg']))]
+    files = [name for name in files if name.endswith(tuple([".TIF", 'TIFF', 'jpg', ".tif"]))]
     if channels == 'ALL':
         channels = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'BQA']
     elif type(channels) == str:
@@ -81,46 +81,85 @@ def JulianDate(year, month, day):
     return day + math.floor((m * 153 + 2) / 5) + 365 * y + math.floor(y / 4) - math.floor(y / 100) + math.floor(
         y / 400) - 32045
 
+# getting property from metadata:
 def get(image, prop):
     metapath = os.path.join(METAPATH, image.split('.')[0] + '_MTL.txt')
     return readMeta(metapath=metapath, properties=prop)
 
+# getting data from metadata
 def getDate(image):
     DateList = get(image=image, prop='DATE_ACQUIRED')['DATE_ACQUIRED'].split('-')
     return datetime.date(int(DateList[0]), int(DateList[1]), int(DateList[2]))
 
-def RobustRegression(Y):
-    parsing = gscript.parse_command('r.info', map=Y[0], flags='ge')
-    shape = [int(parsing['cols']), int(parsing['rows'])]
-    rasters = [garray.array(im) for im in Y]
+# getting reconstruction using regression analyzis:
+def reconstruction(images,coeffs,name):
+    expression = '%s=' %(name)
+    for m1, m2 in zip(images, coeffs):
+        expression += '+%(m1)s*%(m2)s' % {'m1': m1, 'm2': m2}
+    r.mapcalc(expression=expression, overwrite=True)
+    g.remove(type='raster', name=images, flags='fb')
+    return name
+
+# getting coefficients for RLM:
+def coefficients(image,N):
+    Imdate = getDate(image)
+    Julian = JulianDate(year=Imdate.year, month=Imdate.month, day=Imdate.day)
     pi = math.pi
     T = 365
-    times = [getDate(im) for im in Y]
+    coeff1 = 1
+    coeff2 = math.cos(2 * pi * Julian / T)
+    coeff3 = math.sin(2 * pi * Julian / T)
+    coeff4 = math.cos(2 * pi * Julian / (T * N))
+    coeff5 = math.sin(2 * pi * Julian / (T * N))
+    return np.array([coeff1, coeff2, coeff3, coeff4, coeff5])
+
+# getting time for series images:
+def timeSeries(collection):
+    times = [getDate(im) for im in collection]
     minDate = min(times)
     maxDate = max(times)
-    N = math.ceil(relativedelta(maxDate, minDate).years)
-    def row(image):
-        Imdate = getDate(image)
-        Julian = JulianDate(year=Imdate.year, month=Imdate.month, day=Imdate.day)
-        coeff1 = 1
-        coeff2 = math.cos(2 * pi * Julian / T)
-        coeff3 = math.sin(2 * pi * Julian / T)
-        coeff4 = math.cos(2 * pi * Julian / (T * N))
-        coeff5 = math.sin(2 * pi * Julian / (T * N))
-        return np.array([coeff1, coeff2, coeff3, coeff4, coeff5])
-    result = []
+    return math.ceil(relativedelta(maxDate, minDate).years)
+
+# getting components and coefficients from RLM:
+def RobustRegression(collection):
+    parsing = gscript.parse_command('r.info', map=collection[0], flags='ge')
+    shape = [int(parsing['cols']), int(parsing['rows'])]
+    rasters = []
+    for rast in collection:
+        out = os.path.join(METAPATH,rast.split('.')[0] + '_coordinates.txt')
+        r.out_xyz(input=rast, separator='space', output=out)
+        f = open(out, 'r')
+        rasters.append(f.readlines())
+        f.close()
+        os.remove(out)
+    N = timeSeries(collection)
+    X_row = [coefficients(im,N) for im in collection]
+    X_matrix = np.array(X_row).reshape(len(rasters), 5)
+    result = np.zeros((5, shape[0], shape[1]))
     for i in range(shape[1]):
         for j in range(shape[0]):
-            Y_matrix = np.array([rast[i,j] for rast in rasters])
-            X_row = np.array([row(im) for im in Y])
-            X_matrix = X_row.reshape(len(rasters), 5)
-            rlm_model = sm.RLM(endog=Y_matrix, exog=X_matrix, M=sm.robust.norms.HuberT(), missing='drop')
-            rlm_results = rlm_model.fit()
-            result.append(np.array(rlm_results.params))
-    return np.array(result).reshape((shape[0], shape[1]))
-#sm.robust.norms.TukeyBiweight(c = 4.685)
+            Y_matrix = np.array([rast[i*shape[1]+j].split(' ')[2] for rast in rasters], dtype='f')
+            try:
+                rlm_model = sm.RLM(endog=Y_matrix, exog=sm.add_constant(X_matrix), M=sm.robust.norms.HuberT(), missing='drop')
+                rlm_results = rlm_model.fit()
+                coeff = np.array(rlm_results.params)
+            except:
+                coeff = np.empty(5)
+                coeff[:] = np.nan
+            result[:,j,i] = coeff
+    collection_new = []
+    #for lay in range(5):
+    #    name = 'coeff.' + str(lay)
+    #    map = garray.array()
+    #    for i in range(shape[1]):
+    #        for j in range(shape[0]):
+    #            map[j,i] = result[lay,j,i]
+    #    map.write(mapname=name, overwrite=True)
+    #    collection_new.append(name)
+    return X_row#collection_new, X_row
+
 # TMask algorithm:
-def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=1, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
+def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
                    GREEN_CHANNEL_PURE_SNOW_THRESHOLD=0.4, NIR_CHANNEL_PURE_SNOW_THRESHOLD=0.12,
                    BLUE_CHANNEL_THRESHOLD=0.04, NIR_CHANNEL_CLOUD_SNOW_THRESHOLD=0.04,
                    NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04):
@@ -255,92 +294,30 @@ def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=1, RADIUS_BUFF=3, T_MEDIAN_THRE
     im2 = 'LC08_L1TP_112025_20150724_20180204_01_T1.B3_masked'
     im3 = 'LC08_L1TP_112025_20150724_20180204_01_T1.BackUpMask'
     image6 = [im2, im1, im3]
-    images = [image1,image2,image3,image4,image5,image6]
+    im1 = 'LC08_L1TP_112025_20141009_20170418_01_T1.B3_toar'
+    im2 = 'LC08_L1TP_112025_20141009_20170418_01_T1.B3_masked'
+    im3 = 'LC08_L1TP_112025_20141009_20170418_01_T1.BackUpMask'
+    image7 = [im2, im1, im3]
+    im1 = 'LC08_L1TP_112025_20150113_20170414_01_T1.B3_toar'
+    im2 = 'LC08_L1TP_112025_20150113_20170414_01_T1.B3_masked'
+    im3 = 'LC08_L1TP_112025_20150113_20170414_01_T1.BackUpMask'
+    image8 = [im2, im1, im3]
+    im1 = 'LC08_L1TP_112025_20150403_20170411_01_T1.B3_toar'
+    im2 = 'LC08_L1TP_112025_20150403_20170411_01_T1.B3_masked'
+    im3 = 'LC08_L1TP_112025_20150403_20170411_01_T1.BackUpMask'
+    image9 = [im2, im1, im3]
+    im1 = 'LC08_L1TP_112025_20150622_20170407_01_T1.B3_toar'
+    im2 = 'LC08_L1TP_112025_20150622_20170407_01_T1.B3_masked'
+    im3 = 'LC08_L1TP_112025_20150622_20170407_01_T1.BackUpMask'
+    image10 = [im2, im1, im3]
+    images = [image1,image2,image3,image4,image5,image6,image7,image8,image9,image10]
 
     # regression for blue channel:
     B3 = sorted([im[im.index(im[0].split('.')[0] + '.B3_masked')] for im in images])
-    RLR_B3 = RobustRegression(B3)
-
-    """
-    # regression:
-    def regression(collection):
-        times = [getDate(im) for im in collection]
-        minDate = min(times)
-        maxDate = max(times)
-        N = math.ceil(relativedelta(maxDate, minDate).years)
-        band = collection[0].split('.')[1]
-        text = '%s,coeff1,coeff2,coeff3,coeff4,coeff5\n' % (band)
-
-
-        def robustRegression(image,N):
-            basename = image.split('.')[0]
-            Imdate = getDate(image)
-            Julian = JulianDate(year=Imdate.year, month=Imdate.month, day=Imdate.day)
-            T = 365
-            pi = math.pi
-            coeff1 = 1
-            coeff2 = math.cos(2 * pi * Julian / T)
-            coeff3 = math.sin(2 * pi * Julian / T)
-            coeff4 = math.cos(2 * pi * Julian / (T * N))
-            coeff5 = math.sin(2 * pi * Julian / (T * N))
-            bounds = gscript.parse_command('r.info', map=image, flags='ge')
-            east = bounds['E']
-            north = bounds['N']
-            output1 = basename + '.coeff1'
-            output2 = basename + '.coeff2'
-            output3 = basename + '.coeff3'
-            output4 = basename + '.coeff4'
-            output5 = basename + '.coeff5'
-            r.plane(output=output1, dip=0, azimuth=0, easting=east, northing=north, elevation=coeff1, overwrite=True)
-            r.plane(output=output2, dip=0, azimuth=0, easting=east, northing=north, elevation=coeff2, overwrite=True)
-            r.plane(output=output3, dip=0, azimuth=0, easting=east, northing=north, elevation=coeff3, overwrite=True)
-            r.plane(output=output4, dip=0, azimuth=0, easting=east, northing=north, elevation=coeff4, overwrite=True)
-            r.plane(output=output5, dip=0, azimuth=0, easting=east, northing=north, elevation=coeff5, overwrite=True)
-
-
-            return image
-
-
-        coll_regr = list(map(robustRegression, collection))
+    RLR_B3_maps,RLR_B3_coeffs = RobustRegression(B3)
+    #RLR_B3_recon = reconstruction(RLR_B3_maps,RLR_B3_coeffs,'reconstruction.B3')
 
 
 
 
-        for im in collection:
-            basename = im.split('.')[0]
-            output1 = basename + '__coeff1'
-            output2 = basename + '__coeff2'
-            output3 = basename + '__coeff3'
-            output4 = basename + '__coeff4'
-            output5 = basename + '__coeff5'
-            # text += '%(band)s,%(out1)s, + output2 + ',' + output3 + ',' + output4 + ',' + output5 + '\n'
-            text = text + im + ',' + output1 + ',' + output2 + ',' + output3 + ',' + output4 + ',' + output5 + '\n'
-        filepath = os.path.join(METAPATH, 'Regression_' + band + '.txt')
-        f = open(filepath, 'w')
-        f.write(text)
-        f.close()
-        r.mregression.series(samples=filepath, result_prefix='coef.', model='rlm', overwrite=True)
-        collection.remove(['coeff1', 'coeff2', 'coeff3', 'coeff4', 'coeff5'])
-
-    # regression for blue channel:
-    RLR_B3 = regression(collection=B3)
-    """
-
-
-    return RLR_B3
-
-
-    """
-
-        # collection.merge(RLR_B3)
-        # def residual(image):
-        #    input1 = image.select('B3')
-        #    input2 = image.select('B3maskedlwr')
-        #    output = image._name + '__Residual'
-        #    expression = '%(output)s=%(input1)s-%(input2)s' %{'output':output,'input1':input1,'input2':input2}
-        #    gscript.run_command('r.mapcalc',expression=expression,overwrite=True)
-        #    image.addBands(Image(maps=output,Imname=image._name))
-        # collection = collection.Map(residual)
-
-        return RLR_B3
-    """
+    return RLR_B3_maps
