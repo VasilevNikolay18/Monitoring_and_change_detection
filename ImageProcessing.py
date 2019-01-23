@@ -28,6 +28,7 @@ def loadImage(folder, channels='ALL'):
         channels = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11', 'BQA']
     elif type(channels) == str:
         channels = [channels]
+    image = []
     for filename in files:
         file = str(filename.split('.')[0])
         Imname = '_'.join(file.split('_')[:-1])
@@ -35,12 +36,17 @@ def loadImage(folder, channels='ALL'):
         if Bandname in channels:
             input = os.path.join(folder, filename)
             output = Imname + '.' + Bandname
+            image.append(output)
             r.in_gdal(input=input, output=output, overwrite=True, flags='k')
+    return sorted(image)
 
 # downloading image collection to GRASS:
 def loadCollection(folder, channels='ALL'):
     dirlist = [item for item in os.listdir(folder) if os.path.isdir(os.path.join(folder, item))]
-    for foldname in dirlist: loadImage(folder=os.path.join(folder, foldname), channels=channels)
+    collection = []
+    for foldname in dirlist:
+        collection.append(loadImage(folder=os.path.join(folder, foldname), channels=channels))
+    return collection
 
 # reading metadata:
 def readMeta(metapath, properties):
@@ -57,21 +63,25 @@ def readMeta(metapath, properties):
     return MetaDict
 
 # evaluating top of atmosphere reflectance:
-def TOAR(images):
-    for name in images:
-        basename = name.split('.')[0]
-        num = name.split('.')[1]
-        i = num[1:]
-        metapath = os.path.join(METAPATH, basename + '_MTL.txt')
-        prop1 = 'REFLECTANCE_MULT_BAND_%s' % (i)
-        prop2 = 'REFLECTANCE_ADD_BAND_%s' % (i)
-        properties = [prop1, prop2]
-        metadata = readMeta(metapath=metapath, properties=properties)
-        A = metadata['REFLECTANCE_MULT_BAND_%s' % (i)]
-        B = metadata['REFLECTANCE_ADD_BAND_%s' % (i)]
-        output = basename + '.' + num + '_toar'
-        expression = '%(output)s=%(A)s * %(input)s + %(B)s' % {'output': output, 'A': A, 'input': name, 'B': B}
-        r.mapcalc(expression=expression, overwrite=True)
+def TOAR(images, bands):
+    for im in images:
+        for band in bands:
+            basename = im[0].split('.')[0]
+            name = basename + '.' + band
+            i = band[1:]
+            metapath = os.path.join(METAPATH, basename + '_MTL.txt')
+            prop1 = 'REFLECTANCE_MULT_BAND_%s' % (i)
+            prop2 = 'REFLECTANCE_ADD_BAND_%s' % (i)
+            properties = [prop1, prop2]
+            metadata = readMeta(metapath=metapath, properties=properties)
+            A = metadata['REFLECTANCE_MULT_BAND_%s' % (i)]
+            B = metadata['REFLECTANCE_ADD_BAND_%s' % (i)]
+            output = basename + '.' + band + '_toar'
+            im.append(output)
+            expression = '%(output)s=%(A)s * %(input)s + %(B)s' % {'output': output, 'A': A, 'input': name, 'B': B}
+            r.mapcalc(expression=expression, overwrite=True)
+            delete(im, band)
+
 
 # calculating julian date using gregorian date:
 def JulianDate(year, month, day):
@@ -91,11 +101,6 @@ def getDate(image):
     DateList = get(image=image, prop='DATE_ACQUIRED')['DATE_ACQUIRED'].split('-')
     return datetime.date(int(DateList[0]), int(DateList[1]), int(DateList[2]))
 
-# selecting channels from GRASS:
-def selectFromGrass(collection,channels):
-    if type(channels) == str: channels = [channels]
-    return sorted([im for im in collection if im.split('.')[1] in channels])
-
 # selecting channel from collection:
 def selectFromCollection(collection,channel):
     return sorted([im[im.index(im[0].split('.')[0] + '.' + channel)] for im in collection])
@@ -103,14 +108,6 @@ def selectFromCollection(collection,channel):
 # selecting channel from image:
 def selectFromImage(image,channel):
     return image[image.index(image[0].split('.')[0] + '.' + channel)]
-
-# getting reconstruction using regression analyzis:
-def reconstruction(images,coeffs,name):
-    expression = '%s=' %(name)
-    for m1, m2 in zip(images, coeffs):
-        expression += '+%(m1)s*%(m2)s' % {'m1': m1, 'm2': m2}
-    r.mapcalc(expression=expression, overwrite=True)
-    return name
 
 # getting coefficients for RLM:
 def coefficients(image,N):
@@ -132,51 +129,27 @@ def timeSeries(collection):
     return math.ceil(relativedelta(max(times), min(times)).years)
 
 # getting residuals:
-def getResidual(image,reconstruction):
-    basename = image.split('.')[0]
-    band = image.split('.')[1]
-    raster_out = basename + '.' + band + '_residual'
-    expression = '%(out)s=%(im1)s-%(im2)s;' %{'out':raster_out, 'im1':image, 'im2':reconstruction}
+def getResidual(image,reconstruction,channel):
+    basename = image[0].split('.')[0]
+    im = selectFromImage(image, channel)
+    raster_out = basename + '.' + channel + '_residual'
+    expression = '%(out)s=%(im1)s-%(im2)s;' %{'out':raster_out, 'im1':im, 'im2':reconstruction}
     r.mapcalc(expression=expression, overwrite=True)
     image.append(raster_out)
 
 # getting components and coefficients from RLM:
-def RobustRegression(collection):
-    parsing = gscript.parse_command('r.info', map=collection[0], flags='ge')
-    shape = [int(parsing['cols']), int(parsing['rows'])]
-    rasters = []
-    for rast in collection:
-        out = os.path.join(METAPATH,rast.split('.')[0] + '_coordinates.txt')
-        r.out_xyz(input=rast, separator='space', output=out)
-        f = open(out, 'r')
-        rasters.append(f.readlines())
-        f.close()
-        os.remove(out)
-    N = timeSeries(collection)
-    X_row = [coefficients(im,N) for im in collection]
-    X_matrix = np.array(X_row).reshape(len(rasters), 5)
-    result = np.zeros((5, shape[0], shape[1]))
-    for i in range(shape[1]):
-        for j in range(shape[0]):
-            Y_matrix = np.array([rast[i*shape[1]+j].split(' ')[2] for rast in rasters], dtype='f')
-            try:
-                rlm_model = sm.RLM(endog=Y_matrix, exog=sm.add_constant(X_matrix), M=sm.robust.norms.HuberT(), missing='drop')
-                rlm_results = rlm_model.fit()
-                coeff = np.array(rlm_results.params)
-            except:
-                coeff = np.empty(5)
-                coeff[:] = np.nan
-            result[:,j,i] = coeff
-    collection_new = []
-    #for lay in range(5):
-    #    name = 'coeff.' + str(lay)
-    #    map = garray.array()
-    #    for i in range(shape[1]):
-    #        for j in range(shape[0]):
-    #            map[j,i] = result[lay,j,i]
-    #    map.write(mapname=name, overwrite=True)
-    #    collection_new.append(name)
-    return X_row#collection_new, X_row
+def RobustRegression(collection,band,fet,dod,order,delta,iterates):
+    suff = '_lwr'
+    output = selectFromCollection(collection,band)
+    for iter in range(iterates):
+        input = output
+        r.series_lwr(input=input, suffix='_lwr', order=order, fet=fet, dod=dod, delta=delta, flags='lh')
+        output = [im + suff for im in input]
+        if iter != 0:
+            g.remove(type='raster', name=input, flags='fb')
+        if iter == iterates-1:
+            for im, im_new in zip(collection, output):
+                im.append(im_new)
 
 # FMask, composite and non-snow masks:
 def FMask(image, radius):
@@ -195,7 +168,7 @@ def FMask(image, radius):
                  '%(out3)s=(Clouds || Cirrus)*3 + Snow*2' \
                 %{'BQA':image_BQA, 'out1': raster_FMask, 'out2': raster_nonSnow, 'out3': raster_composite}
     r.mapcalc(expression=expression, overwrite=True)
-    r.grow(input=raster_FMask, output=raster_FMask, radius=radius, overwrite=True)
+    #r.grow(input=raster_FMask, output=raster_FMask, radius=radius, overwrite=True)
     image.append(raster_composite)
     image.append(raster_nonSnow)
     return raster_FMask
@@ -256,37 +229,32 @@ def TMaskp_mask(image, ClearSmall):
 # classification:
 def classify(image, const1, const2, const3, const4, const5, const6, recon_B3, recon_B6):
     baseName = image[0].split('.')[0]
-    raster_out = baseName + '.Tmask'
+    raster_out = baseName + '.TMask'
     B3_observe = selectFromImage(image,'B3_masked')
     res_B3 = selectFromImage(image,'B3_masked_residual')
     res_B5 = selectFromImage(image,'B5_masked_residual')
     res_B6 = selectFromImage(image,'B6_masked_residual')
+    rec_B3 = selectFromImage(image,recon_B3)
+    rec_B6 = selectFromImage(image,recon_B6)
     expression = 'eval(T_snow=(%(const1)s-%(recon_B6)s)*(%(observed_B3)s-%(recon_B3)s)/(%(const2)s-%(recon_B3)s), ' \
-                 'Step1=%(resB3)s>%(const3)s, ' \
-                 'Step2=(%(resB5)s>%(const4)s)*(%(resB6)s<T_snow),' \
-                 'Step3=(%(resB5)s<%(const5)s)*(%(resB6)s<%(const6)s)' \
-                 'Snow=Step1*Step2, ' \
-                 'Cloud=Step1*(not(Step2)), ' \
-                 'Cloud_shadow=(not(Step1))*Step3); ' \
-                 '%(out)s=Cloud*3+Snow*2+Cloud_shadow;' \
-                 % {'const1': const1, 'recon_B6': recon_B6, 'observed_B3': B3_observe, 'recon_B3': recon_B3,
+                 'Step1=(%(resB3)s)>(%(const3)s), ' \
+                 'Step2=((%(resB5)s)>(%(const4)s))&&((%(resB6)s)<T_snow), ' \
+                 'Step3=((%(resB5)s)<(%(const5)s))&&((%(resB6)s)<(%(const6)s)), ' \
+                 'Snow=Step1&&Step2, ' \
+                 'Cloud=Step1&&(not(Step2)), ' \
+                 'Cloud_shadow=(not(Step1))&&Step3); ' \
+                 '%(out)s=Cloud*3 + Snow*2 + Cloud_shadow;' \
+                 % {'const1': const1, 'recon_B6': rec_B6, 'observed_B3': B3_observe, 'recon_B3': rec_B3,
                     'const2': const2, 'resB3': res_B3, 'const3': const3, 'resB5': res_B5, 'const4': const4,
                     'resB6': res_B6, 'const5': const5, 'const6': const6, 'out': raster_out}
     r.mapcalc(expression=expression, overwrite=True)
     image.append(raster_out)
 
 # TMask algorithm:
-def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
+def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
                    BLUE_CHANNEL_PURE_SNOW_THRESHOLD=0.4, NIR_CHANNEL_PURE_SNOW_THRESHOLD=0.12,
                    BLUE_CHANNEL_THRESHOLD=0.04, NIR_CHANNEL_CLOUD_SNOW_THRESHOLD=0.04,
                    NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04):
-    """
-    # sorting:
-    B3 = selectFromGrass(rasters,'B3_toar')
-    B5 = selectFromGrass(rasters,'B5_toar')
-    B6 = selectFromGrass(rasters,'B6_toar')
-    BQA = selectFromGrass(rasters,'BQA')
-    images = [[ch1,ch2,ch3,ch4] for (ch1,ch2,ch3,ch4) in zip(B3,B5,B6,BQA)]
 
     # the size of the collection:
     ImageCounts = len(images)
@@ -337,85 +305,20 @@ def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRE
         delete(im, 'B5_toar')
         delete(im, 'B6_toar')
     g.remove(type='raster', name=ClearSmall, flags='fb')
-    #"""
-    im1 = 'LC08_L1TP_112025_20130429_20170505_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20130429_20170505_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20130429_20170505_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20130429_20170505_01_T1.BackUpMask'
-    image1 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20141126_20170417_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20141126_20170417_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20141126_20170417_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20141126_20170417_01_T1.BackUpMask'
-    image2 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20150521_20170408_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20150521_20170408_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20150521_20170408_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20150521_20170408_01_T1.BackUpMask'
-    image3 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20131022_20170429_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20131022_20170429_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20131022_20170429_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20131022_20170429_01_T1.BackUpMask'
-    image4 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20140705_20170421_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20140705_20170421_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20140705_20170421_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20140705_20170421_01_T1.BackUpMask'
-    image5 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20150724_20180204_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20150724_20180204_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20150724_20180204_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20150724_20180204_01_T1.BackUpMask'
-    image6 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20141009_20170418_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20141009_20170418_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20141009_20170418_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20141009_20170418_01_T1.BackUpMask'
-    image7 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20150113_20170414_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20150113_20170414_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20150113_20170414_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20150113_20170414_01_T1.BackUpMask'
-    image8 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20150403_20170411_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20150403_20170411_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20150403_20170411_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20150403_20170411_01_T1.BackUpMask'
-    image9 = [im2,im1,im3,im4]
-    im1 = 'LC08_L1TP_112025_20150622_20170407_01_T1.B3_masked'
-    im2 = 'LC08_L1TP_112025_20150622_20170407_01_T1.B5_masked'
-    im3 = 'LC08_L1TP_112025_20150622_20170407_01_T1.B6_masked'
-    im4 = 'LC08_L1TP_112025_20150622_20170407_01_T1.BackUpMask'
-    image10 = [im2,im1,im3,im4]
-    images = [image1,image2,image3,image4,image5,image6,image7,image8,image9,image10]
 
-    # regression for blue channel:
-    B3 = selectFromCollection(images,'B3_masked')
-    RLR_B3_maps,RLR_B3_coeffs = RobustRegression(B3)
-    RLR_B3_recon = reconstruction(RLR_B3_maps,RLR_B3_coeffs,'reconstruction.B3')
-    g.remove(type='raster', name=RLR_B3_maps, flags='fb')
-
-    # regression for NIR channel:
-    B5 = selectFromCollection(images, 'B5_masked')
-    RLR_B5_maps, RLR_B5_coeffs = RobustRegression(B5)
-    RLR_B5_recon = reconstruction(RLR_B5_maps, RLR_B5_coeffs, 'reconstruction.B5')
-    g.remove(type='raster', name=RLR_B5_maps, flags='fb')
-
-    # regression for SWIR channel:
-    B6 = selectFromCollection(images, 'B6_masked')
-    RLR_B6_maps, RLR_B6_coeffs = RobustRegression(B6)
-    RLR_B6_recon = reconstruction(RLR_B6_maps, RLR_B6_coeffs, 'reconstruction.B6')
-    g.remove(type='raster', name=RLR_B6_maps, flags='fb')
+    # regression for blue, NIR, SWIR channel:
+    RobustRegression(images, 'B3_masked', fet=0.5, dod=0.5, order=1, delta=0.5, iterates=2)
+    RobustRegression(images, 'B5_masked', fet=0.5, dod=0.5, order=1, delta=0.5, iterates=2)
+    RobustRegression(images, 'B6_masked', fet=0.5, dod=0.5, order=1, delta=0.5, iterates=2)
 
     # getting residuals:
     for im in images:
-        getResidual(selectFromImage(im, 'B3_masked'), RLR_B3_recon)
-        getResidual(selectFromImage(im, 'B5_masked'), RLR_B5_recon)
-        getResidual(selectFromImage(im, 'B6_masked'), RLR_B6_recon)
+        getResidual(im, selectFromImage(im, 'B3_masked_lwr_lwr'), 'B3_masked')
+        getResidual(im, selectFromImage(im, 'B5_masked_lwr_lwr'), 'B5_masked')
+        getResidual(im, selectFromImage(im, 'B6_masked_lwr_lwr'), 'B6_masked')
         delete(im, 'B5_masked')
         delete(im, 'B6_masked')
-    delete(RLR_B5_recon, 'B5')
+        delete(im, 'B5_masked_lwr_lwr')
 
     # classification:
     const1 = NIR_CHANNEL_PURE_SNOW_THRESHOLD
@@ -425,8 +328,22 @@ def TMaskAlgorithm(rasters, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRE
     const5 = NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD
     const6 = SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD
     for im in images:
-        classify(im, const1, const2, const3, const4, const5, const6, RLR_B3_recon, RLR_B6_recon)
-    delete(RLR_B3_recon, 'B3')
-    delete(RLR_B6_recon, 'B6')
-    #"""
+        classify(im, const1, const2, const3, const4, const5, const6, 'B3_masked_lwr_lwr', 'B6_masked_lwr_lwr')
+        delete(im, 'B3_masked_lwr_lwr')
+        delete(im, 'B6_masked_lwr_lwr')
+        delete(im, 'B3_masked')
+        delete(im, 'B3_masked_residual')
+        delete(im, 'B5_masked_residual')
+        delete(im, 'B6_masked_residual')
+
+    for im in images:
+        basename = im[0].split('.')[0]
+        out = basename + '.Mask'
+        expression = '%(out)s=(%(mask1)s) + (%(mask2)s)' \
+                     %{'out':out, 'mask1': selectFromImage(im,'BackUpMask'), 'mask2': selectFromImage(im,'TMask')}
+        r.mapcalc(expression=expression, overwrite=True)
+        delete(im, 'BackUpMask')
+        delete(im, 'TMask')
+        im.append(out)
+
     return images
