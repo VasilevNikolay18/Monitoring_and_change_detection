@@ -2,8 +2,6 @@
 import os, sys, collections, re, logging, math, datetime
 from shutil import copyfile
 from dateutil.relativedelta import relativedelta
-import statsmodels.api as sm
-import numpy as np
 import grass.script as gscript
 from grass.script import array as garray
 from grass.pygrass.modules.shortcuts import general as g
@@ -82,7 +80,6 @@ def TOAR(images, bands):
             r.mapcalc(expression=expression, overwrite=True)
             delete(im, band)
 
-
 # calculating julian date using gregorian date:
 def JulianDate(year, month, day):
     a = math.floor((14 - month) / 12)
@@ -108,20 +105,6 @@ def selectFromCollection(collection,channel):
 # selecting channel from image:
 def selectFromImage(image,channel):
     return image[image.index(image[0].split('.')[0] + '.' + channel)]
-
-# getting coefficients for RLM:
-def coefficients(image,N):
-    Imdate = getDate(image)
-    Julian = JulianDate(year=Imdate.year, month=Imdate.month, day=Imdate.day)
-    pi = math.pi
-    T = 365
-    result = np.zeros(5)
-    result[0] = 1
-    result[1] = math.cos(2 * pi * Julian / T)
-    result[2] = math.sin(2 * pi * Julian / T)
-    result[3] = math.cos(2 * pi * Julian / (T * N))
-    result[4] = math.sin(2 * pi * Julian / (T * N))
-    return result
 
 # getting time for series images:
 def timeSeries(collection):
