@@ -121,12 +121,13 @@ def getResidual(image,reconstruction,channel):
     image.append(raster_out)
 
 # getting components and coefficients from RLM:
-def RobustRegression(collection,band,fet,dod,order,delta,iterates):
+def RobustRegression(collection,band,fet,dod,order,iterates):
     suff = '_lwr'
     output = selectFromCollection(collection,band)
+    #date = [JulianDate(getDate(im[0]).year, getDate(im[0]).month, getDate(im[0]).day) for im in collection]
     for iter in range(iterates):
         input = output
-        r.series_lwr(input=input, suffix='_lwr', order=order, fet=fet, dod=dod, delta=delta, flags='lh')
+        r.series_lwr(input=input, suffix='_lwr', order=order, fet=fet, dod=dod, flags='lh')
         output = [im + suff for im in input]
         if iter != 0:
             g.remove(type='raster', name=input, flags='fb')
@@ -142,19 +143,20 @@ def FMask(image, radius):
     raster_nonSnow = baseName + '.nonSnow'
     raster_composite = baseName + '.Composite'
     expression = 'eval(BQA_int=int(%(BQA)s), ' \
-                 'Clouds=((BQA_int & 32)!=0)&((BQA_int & 64)!=0), ' \
-                 'CloudShadows=((BQA_int & 128)!=0)&((BQA_int & 256)!=0), ' \
-                 'Snow=((BQA_int & 512)!=0)&((BQA_int & 1024)!=0), ' \
-                 'Cirrus=((BQA_int & 2048)!=0)&((BQA_int & 4096)!=0)); ' \
-                 '%(out1)s=Clouds || CloudShadows || Snow || Cirrus; ' \
+                 'Clouds=((BQA_int & 32)!=0)&&((BQA_int & 64)!=0), ' \
+                 'CloudShadows=((BQA_int & 128)!=0)&&((BQA_int & 256)!=0), ' \
+                 'Snow=((BQA_int & 512)!=0)&&((BQA_int & 1024)!=0)); ' \
+                 '%(out1)s=Clouds || CloudShadows || Snow; ' \
                  '%(out2)s=not(Snow); ' \
-                 '%(out3)s=(Clouds || Cirrus)*3 + Snow*2' \
+                 '%(out3)s=Clouds*3 + Snow*2' \
                 %{'BQA':image_BQA, 'out1': raster_FMask, 'out2': raster_nonSnow, 'out3': raster_composite}
     r.mapcalc(expression=expression, overwrite=True)
     #r.grow(input=raster_FMask, output=raster_FMask, radius=radius, overwrite=True)
     image.append(raster_composite)
     image.append(raster_nonSnow)
+    logging.info('FMask')
     return raster_FMask
+#Cirrus=((BQA_int & 2048)!=0)&&((BQA_int & 4096)!=0));
 
 # deleting image channel:
 def delete(image, channel):
@@ -168,10 +170,11 @@ def BackUp_mask(image,ClearSmall):
     raster_out = baseName + '.B3_masked'
     B3_toar = selectFromImage(image,'B3_toar')
     NonSnow = selectFromImage(image,'nonSnow')
-    expression = '%(out)s=%(inp1)s*%(inp2)s*%(inp3)s' \
+    expression = '%(out)s=%(inp1)s*(%(inp2)s&&%(inp3)s)' \
                  % {'out': raster_out, 'inp1': B3_toar, 'inp2': NonSnow, 'inp3': ClearSmall}
     r.mapcalc(expression=expression, overwrite=True)
     image.append(raster_out)
+    logging.info('BackUp_mask')
 
 # BackUp algorithm:
 def BackUpAlgorithm(image, ClearSmall, Mediana, T_MEDIAN_THRESHOLD):
@@ -186,9 +189,10 @@ def BackUpAlgorithm(image, ClearSmall, Mediana, T_MEDIAN_THRESHOLD):
                     'output': raster_out, 'Composite': Composite}
     image.append(raster_out)
     r.mapcalc(expression=expression, overwrite=True)
+    logging.info('BackUpAlgorithm')
 
 # create mask for TMask algorithm:
-def TMaskp_mask(image, ClearSmall):
+def TMaskp_mask(image):
     baseName = image[0].split('.')[0]
     raster_out1 = baseName + '.B3_masked'
     raster_out2 = baseName + '.B5_masked'
@@ -197,17 +201,17 @@ def TMaskp_mask(image, ClearSmall):
     B5_toar = selectFromImage(image, 'B5_toar')
     B6_toar = selectFromImage(image, 'B6_toar')
     BackUpMask = selectFromImage(image,'BackUpMask')
-    expression = 'eval(Clear1=not(%(BackUpMask)s), ' \
-                 'Clear2=not(%(ClearSmall)s)); ' \
-                 '%(out1)s=%(B3)s*(Clear1+Clear2);' \
-                 '%(out2)s=%(B5)s*(Clear1+Clear2);' \
-                 '%(out3)s=%(B6)s*(Clear1+Clear2)' \
-                 % {'BackUpMask': BackUpMask, 'ClearSmall': ClearSmall, 'out1': raster_out1, 'B3': B3_toar,
+    expression = 'eval(Clear=not(%(BackUpMask)s)); ' \
+                 '%(out1)s=%(B3)s*Clear;' \
+                 '%(out2)s=%(B5)s*Clear;' \
+                 '%(out3)s=%(B6)s*Clear' \
+                 % {'BackUpMask': BackUpMask, 'out1': raster_out1, 'B3': B3_toar,
                     'out2': raster_out2, 'B5': B5_toar, 'out3': raster_out3, 'B6': B6_toar}
     r.mapcalc(expression=expression, overwrite=True)
     image.append(raster_out1)
     image.append(raster_out2)
     image.append(raster_out3)
+    logging.info('TMaskp_mask')
 
 # classification:
 def classify(image, const1, const2, const3, const4, const5, const6, recon_B3, recon_B6):
@@ -232,12 +236,16 @@ def classify(image, const1, const2, const3, const4, const5, const6, recon_B3, re
                     'resB6': res_B6, 'const5': const5, 'const6': const6, 'out': raster_out}
     r.mapcalc(expression=expression, overwrite=True)
     image.append(raster_out)
+    logging.info('classify')
 
 # TMask algorithm:
-def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
+def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=15, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
                    BLUE_CHANNEL_PURE_SNOW_THRESHOLD=0.4, NIR_CHANNEL_PURE_SNOW_THRESHOLD=0.12,
                    BLUE_CHANNEL_THRESHOLD=0.04, NIR_CHANNEL_CLOUD_SNOW_THRESHOLD=0.04,
-                   NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04):
+                   NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=0):
+
+    # sorting by date:
+    images.sort(key=lambda im: getDate(im[0]), reverse=True)
 
     # the size of the collection:
     ImageCounts = len(images)
@@ -259,7 +267,7 @@ def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRES
     map(lambda im: g.remove(type='raster', name=im, flags='fb'), FMask_collection)
 
     # detect which part of data should be used for BackUp algorithm:
-    expression = 'ClearSmall.const=%(im)s>%(thresh)s' % {'im': ConditionMap, 'thresh': BACKUP_ALG_THRESHOLD}
+    expression = 'ClearSmall.const=%(im)s>(%(all)s-%(thresh)s)' % {'im': ConditionMap, 'all': ImageCounts, 'thresh': BACKUP_ALG_THRESHOLD}
     r.mapcalc(expression=expression, overwrite=True)
     ClearSmall = 'ClearSmall.const'
     g.remove(type='raster', name=ConditionMap, flags='fb')
@@ -283,16 +291,16 @@ def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRES
 
     # create mask for TMask algorithm:
     for im in images:
-        TMaskp_mask(im, ClearSmall)
-        delete(im, 'B3_toar')
-        delete(im, 'B5_toar')
-        delete(im, 'B6_toar')
-    g.remove(type='raster', name=ClearSmall, flags='fb')
+        TMaskp_mask(im)
+        #delete(im, 'B3_toar')
+        #delete(im, 'B5_toar')
+        #delete(im, 'B6_toar')
+    #g.remove(type='raster', name=ClearSmall, flags='fb')
 
     # regression for blue, NIR, SWIR channel:
-    RobustRegression(images, 'B3_masked', fet=0.5, dod=0.5, order=1, delta=0.5, iterates=2)
-    RobustRegression(images, 'B5_masked', fet=0.5, dod=0.5, order=1, delta=0.5, iterates=2)
-    RobustRegression(images, 'B6_masked', fet=0.5, dod=0.5, order=1, delta=0.5, iterates=2)
+    RobustRegression(images, 'B3_masked', fet=0.5, dod=2, order=1, iterates=2)
+    RobustRegression(images, 'B5_masked', fet=0.5, dod=2, order=1, iterates=2)
+    RobustRegression(images, 'B6_masked', fet=0.5, dod=2, order=1, iterates=2)
 
     # getting residuals:
     for im in images:
@@ -301,7 +309,7 @@ def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRES
         getResidual(im, selectFromImage(im, 'B6_masked_lwr_lwr'), 'B6_masked')
         delete(im, 'B5_masked')
         delete(im, 'B6_masked')
-        delete(im, 'B5_masked_lwr_lwr')
+        #delete(im, 'B5_masked_lwr_lwr')
 
     # classification:
     const1 = NIR_CHANNEL_PURE_SNOW_THRESHOLD
@@ -322,7 +330,7 @@ def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=4, RADIUS_BUFF=3, T_MEDIAN_THRES
     for im in images:
         basename = im[0].split('.')[0]
         out = basename + '.Mask'
-        expression = '%(out)s=(%(mask1)s) + (%(mask2)s)' \
+        expression = '%(out)s=(%(mask1)s) + (%(mask2)s*not(%(mask1)s))' \
                      %{'out':out, 'mask1': selectFromImage(im,'BackUpMask'), 'mask2': selectFromImage(im,'TMask')}
         r.mapcalc(expression=expression, overwrite=True)
         delete(im, 'BackUpMask')

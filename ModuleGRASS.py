@@ -18,3 +18,4 @@ T = ImageProcessing.TMaskAlgorithm(images=rasters)
 
 print(T)
 print('OK')
+
