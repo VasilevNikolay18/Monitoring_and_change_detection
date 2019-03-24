@@ -242,7 +242,7 @@ def classify(image, const1, const2, const3, const4, const5, const6, recon_B3, re
 def TMaskAlgorithm(images, BACKUP_ALG_THRESHOLD=15, RADIUS_BUFF=3, T_MEDIAN_THRESHOLD=0.04,
                    BLUE_CHANNEL_PURE_SNOW_THRESHOLD=0.4, NIR_CHANNEL_PURE_SNOW_THRESHOLD=0.12,
                    BLUE_CHANNEL_THRESHOLD=0.04, NIR_CHANNEL_CLOUD_SNOW_THRESHOLD=0.04,
-                   NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=0):
+                   NIR_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04, SWIR1_CHANNEL_SHADOW_CLEAR_THRESHOLD=-0.04):
 
     # sorting by date:
     images.sort(key=lambda im: getDate(im[0]), reverse=True)
